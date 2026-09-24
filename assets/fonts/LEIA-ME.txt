@@ -1,0 +1,3 @@
+Roboto — Copyright 2011 The Roboto Project Authors (https://github.com/googlefonts/roboto-classic).
+Distribuída sob a SIL Open Font License, Version 1.1 (https://openfontlicense.org).
+Os arquivos .ttf são incluídos para que os gráficos usem Roboto mesmo em servidores sem a fonte instalada.
