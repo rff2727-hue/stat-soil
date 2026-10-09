@@ -55,6 +55,7 @@ class Especificacao:
     linha: str | None = None        # DQL
     coluna: str | None = None       # DQL
     tratamento: str | None = None   # fatorial + adicional: coluna com o nome de cada tratamento
+    aninhar_bloco: str | None = None  # análise conjunta: blocos aninhados nesta coluna (ambiente)
 
     # ------------------------------------------------------------------
     @property
@@ -179,6 +180,7 @@ class DadosPreparados:
     avisos: list
     balanceado: bool
     r: float                        # repetições por célula (média harmônica)
+    incompleto: bool = False        # multiestrato com unidades perdidas → modelo misto
 
     @property
     def fatores(self):
@@ -208,6 +210,8 @@ def preparar(df: pd.DataFrame, spec: Especificacao, variavel: str, transformacao
                     f"O fator '{f.rotulo}' foi marcado como quantitativo, mas tem níveis não numéricos: {ruins[:5]}")
     if spec.bloco:
         d["BL"] = df[spec.bloco].map(rotulo_nivel)
+    if spec.aninhar_bloco:
+        d["AMB"] = df[spec.aninhar_bloco].map(rotulo_nivel)
     if spec.base == "DQL":
         d["LIN"] = df[spec.linha].map(rotulo_nivel)
         d["COL"] = df[spec.coluna].map(rotulo_nivel)
@@ -297,18 +301,22 @@ def preparar(df: pd.DataFrame, spec: Especificacao, variavel: str, transformacao
         esperado = set(itertools.product(blocos, *niveis))
         presentes = set(map(tuple, d[chave].to_numpy()))
         faltam = sorted(esperado - presentes)
-        if faltam:
-            raise ErroDelineamento(
-                "Parcelas subdivididas/faixas exigem dados completos (balanceados). Faltam "
-                f"{len(faltam)} unidade(s), por exemplo: "
-                + "; ".join(f"bloco/rep {c[0]} – " + " / ".join(c[1:]) for c in faltam[:4])
-                + ". Preencha ou estime as parcelas perdidas antes da análise.")
-        balanceado = True
+        incompleto = bool(faltam)
+        if incompleto:
+            avisos.append(
+                f"{len(faltam)} unidade(s) experimental(is) ausente(s) (ex.: "
+                + "; ".join(f"bloco/rep {c[0]} – " + " / ".join(c[1:]) for c in faltam[:3])
+                + "). Análise por modelo misto (REML), com as unidades de parcela como efeitos aleatórios; "
+                  "testes F de Wald com GL do estrato correspondente.")
+        balanceado = not incompleto
         r = float(len(blocos))
+    else:
+        incompleto = False
 
     d = d.reset_index(drop=True)
     return DadosPreparados(d=d, spec=spec, niveis=niveis, celulas=celulas, celulas_fatoriais=celulas_fat,
-                           adicionais=adicionais, avisos=avisos, balanceado=bool(balanceado), r=r)
+                           adicionais=adicionais, avisos=avisos, balanceado=bool(balanceado), r=r,
+                           incompleto=incompleto)
 
 
 # ----------------------------------------------------------------------------

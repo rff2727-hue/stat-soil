@@ -1,17 +1,20 @@
 """
-Orquestração: escolhe os gráficos adequados para cada resultado e empacota
-figuras e planilhas para download.
+Orquestração: decide quais figuras cada resultado merece (como especificações
+de dados, motor.figuras.Spec*) e empacota figuras para download.
 """
 from __future__ import annotations
 
 import io
 import re
 import zipfile
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 
-from . import graficos as gr
+from . import figuras as fg
+from . import tema as tm
 
 PALAVRAS_CAMADA = ("prof", "camada", "depth", "layer", "horizonte")
 
@@ -30,121 +33,136 @@ def _rot_x(f):
     return f.rotulo + (f" ({f.unidade})" if getattr(f, "unidade", "") else "")
 
 
-def figuras_para(res, cfg: gr.ConfigGrafico, rotulo_y=None, perfil=None):
-    """Lista de (nome, título, figura) para um ResultadoVariavel.
+@dataclass
+class ItemFigura:
+    id: str          # identificador estável (usado para guardar ajustes)
+    nome: str        # nome de arquivo
+    titulo: str      # rótulo legível
+    spec: object
+    variavel: str = ""
+    grupo: str | None = None
 
-    perfil: índice do fator que representa camadas de solo (gráfico em perfil), ou None.
-    """
+
+def _curva(f, rotulo, alfa, modelo=None):
+    reg = f.regressao
+    return fg.Curva(rotulo=rotulo, x=reg.x, medias=reg.medias, ep=f.ep_dados, dp=f.dp_dados, n=f.n,
+                    obs_x=reg.obs_x, obs_y=reg.obs_y, modelo=modelo or reg.melhor,
+                    sig=f.p is not None and f.p < alfa)
+
+
+def specs_para(res, rotulo_y=None, perfil=None, grupo=None, idioma="pt"):
+    """Lista de ItemFigura para um ResultadoVariavel."""
     spec = res.spec
     ry = rotulo_y or res.variavel
-    figs = []
-    usados = set()
     alfa = res.alfa
-    # interações duplas
+    itens = []
+    usados = set()
+    base = f"{_slug(res.variavel)}" + (f"__{_slug(grupo)}" if grupo else "")
+
+    def add(sufixo, titulo, sp):
+        itens.append(ItemFigura(id=f"{base}::{sufixo}", nome=f"{base}_{_slug(sufixo)}", titulo=titulo, spec=sp,
+                                variavel=res.variavel, grupo=grupo))
+
+    d = res.dados.d
     for td in res.tabelas_duplas:
         a, b = td["fatores"]
         fa, fb = spec.fatores[a], spec.fatores[b]
         usados |= {a, b}
-        nome = f"{_slug(res.variavel)}_{_slug(fa.rotulo)}_x_{_slug(fb.rotulo)}"
+        chave = f"{_slug(fa.rotulo)}_x_{_slug(fb.rotulo)}"
         if perfil in (a, b):
             cam, outro = (a, b) if perfil == a else (b, a)
             series = []
             for nv in res.dados.niveis[outro]:
                 fat = [f for f in res.fatias if f.fator == cam and f.condicao == {outro: nv}]
-                if not fat:
-                    continue
-                f = fat[0]
-                series.append(dict(rotulo=nv, medias=f.medias_orig, ep=f.ep_dados, dp=f.dp_dados, n=f.n))
-            fig = gr.fig_perfil(series, res.dados.niveis[cam], cfg, rotulo_x=ry, rotulo_camada=_rot_x(spec.fatores[cam]),
-                                titulo_legenda=spec.fatores[outro].rotulo)
-            figs.append((nome + "_perfil", f"Perfil: {spec.fatores[outro].rotulo} × {spec.fatores[cam].rotulo}", fig))
-        if fa.quantitativo != fb.quantitativo:
-            q, o = (a, b) if fa.quantitativo else (b, a)
+                if fat:
+                    f = fat[0]
+                    series.append(dict(rotulo=nv, medias=f.medias_orig, ep=f.ep_dados, dp=f.dp_dados, n=f.n))
+            add(chave + "_perfil", f"Perfil — {spec.fatores[outro].rotulo} × {spec.fatores[cam].rotulo}",
+                fg.SpecPerfil(res.dados.niveis[cam], series, ry, _rot_x(spec.fatores[cam]), spec.fatores[outro].rotulo))
+        if fa.quantitativo != fb.quantitativo or (fa.quantitativo and fb.quantitativo):
+            q, o = ((a, b) if fa.quantitativo else (b, a)) if fa.quantitativo != fb.quantitativo else (a, b)
             curvas = []
             for nv in res.dados.niveis[o]:
                 fat = [f for f in res.fatias if f.fator == q and f.condicao == {o: nv}]
                 if fat and fat[0].regressao:
-                    f = fat[0]
-                    curvas.append(dict(rotulo=nv, reg=f.regressao, ep=f.ep_dados, dp=f.dp_dados, n=f.n,
-                                       sig=f.p is not None and f.p < alfa))
+                    curvas.append(_curva(fat[0], nv, alfa))
             if curvas:
-                fig = gr.fig_regressao(curvas, cfg, rotulo_x=_rot_x(spec.fatores[q]), rotulo_y=ry,
-                                       titulo_legenda=spec.fatores[o].rotulo)
-                figs.append((nome + "_regressao", f"Regressão: {spec.fatores[q].rotulo} em cada {spec.fatores[o].rotulo}", fig))
-        elif not (fa.quantitativo and fb.quantitativo):
-            d = res.dados.d
-            obs = d[["F%d" % a, "F%d" % b, "y_orig"]].rename(columns={"F%d" % a: "A", "F%d" % b: "B", "y_orig": "y"})
-            fig = gr.fig_interacao(td, cfg, obs=obs, rotulo_y=ry, nome_linhas=fa.rotulo, nome_colunas=fb.rotulo)
-            figs.append((nome, f"Interação {fa.rotulo} × {fb.rotulo}", fig))
-        elif fa.quantitativo and fb.quantitativo:
-            # superfície: curvas de a em cada nível de b
-            curvas = []
-            for nv in res.dados.niveis[b]:
-                fat = [f for f in res.fatias if f.fator == a and f.condicao == {b: nv}]
-                if fat and fat[0].regressao:
-                    f = fat[0]
-                    curvas.append(dict(rotulo=nv, reg=f.regressao, ep=f.ep_dados, dp=f.dp_dados, n=f.n,
-                                       sig=f.p is not None and f.p < alfa))
-            if curvas:
-                fig = gr.fig_regressao(curvas, cfg, rotulo_x=_rot_x(fa), rotulo_y=ry, titulo_legenda=fb.rotulo)
-                figs.append((nome + "_regressao", f"Regressão: {fa.rotulo} em cada {fb.rotulo}", fig))
-    # efeitos simples / principais
+                add(chave + "_regressao", f"Regressão — {spec.fatores[q].rotulo} em cada {spec.fatores[o].rotulo}",
+                    fg.SpecRegressao(curvas, _rot_x(spec.fatores[q]), ry, spec.fatores[o].rotulo))
+        else:
+            obs = d[[f"F{a}", f"F{b}", "y_orig"]].rename(columns={f"F{a}": "A", f"F{b}": "B", "y_orig": "y"})
+            med = td["medias"]
+            dp = pd.DataFrame(index=med.index, columns=med.columns, dtype=float)
+            nn = pd.DataFrame(index=med.index, columns=med.columns, dtype=float)
+            g = obs.groupby(["A", "B"])["y"]
+            for (aa, bb), v in g:
+                if aa in dp.index and bb in dp.columns:
+                    dp.loc[aa, bb] = v.std(ddof=1)
+                    nn.loc[aa, bb] = len(v)
+            add(chave, f"Interação — {fa.rotulo} × {fb.rotulo}",
+                fg.SpecGrupos(list(med.index), list(med.columns), med, td["ep"], dp, nn, td["letras"], obs,
+                              fa.rotulo, fb.rotulo, ry))
     for f in res.fatias:
         fat = spec.fatores[f.fator]
         if f.condicao and f.fator in usados:
             continue
         cond = ", ".join(f"{spec.fatores[k].rotulo} = {v}" for k, v in f.condicao.items())
-        nome = f"{_slug(res.variavel)}_{_slug(fat.rotulo)}" + (f"_{_slug(cond)}" if cond else "")
+        chave = _slug(fat.rotulo) + (f"_{_slug(cond)}" if cond else "")
         titulo = fat.rotulo + (f" ({cond})" if cond else "")
         sig = f.p is not None and f.p < alfa
         if f.regressao is not None and not f.comparacao:
-            fig = gr.fig_regressao([dict(rotulo=None, reg=f.regressao, ep=f.ep_dados, dp=f.dp_dados, n=f.n, sig=sig)],
-                                   cfg, rotulo_x=_rot_x(fat), rotulo_y=ry)
-            figs.append((nome + "_regressao", "Regressão: " + titulo, fig))
+            add(chave + "_regressao", "Regressão — " + titulo,
+                fg.SpecRegressao([_curva(f, None, alfa)], _rot_x(fat), ry))
             continue
         if perfil == f.fator and not f.condicao:
-            fig = gr.fig_perfil([dict(rotulo=None, medias=f.medias_orig, ep=f.ep_dados, dp=f.dp_dados, n=f.n)],
-                                f.niveis, cfg, rotulo_x=ry, rotulo_camada=_rot_x(fat))
-            figs.append((nome + "_perfil", "Perfil: " + titulo, fig))
-            continue
+            add(chave + "_perfil", "Perfil — " + titulo,
+                fg.SpecPerfil(f.niveis, [dict(rotulo=None, medias=f.medias_orig, ep=f.ep_dados, dp=f.dp_dados, n=f.n)],
+                              ry, _rot_x(fat)))
         letras = None
-        if f.comparacao is not None and sig:
+        if f.comparacao is not None:
             letras = f.comparacao.letras if f.comparacao.metodo != "dunnett" else \
                 [{"*": "*", "ns": "", "(controle)": ""}.get(L, "") for L in f.comparacao.letras]
-        fig = gr.fig_medias(f.niveis, f.medias_orig, f.ep_dados, f.dp_dados, f.n, f.obs, letras, cfg,
-                            rotulo_x=_rot_x(fat), rotulo_y=ry,
-                            titulo=(cond if cond else None))
-        figs.append((nome, titulo, fig))
-    # fatorial + adicional: todos os tratamentos
+        obs = f.obs[["nivel", "y_orig"]].rename(columns={"y_orig": "y"}) if f.obs is not None else None
+        add(chave, "Médias — " + titulo,
+            fg.SpecMedias(f.niveis, f.medias_orig, f.ep_dados, f.dp_dados, f.n, obs, letras, sig, _rot_x(fat), ry,
+                          titulo=cond))
     ex = res.extras.get("todos_tratamentos")
     if ex:
         c = ex["comparacao"]
         trat_p = [l.p for l in res.anova if l.fonte == "Tratamentos"]
         sig = bool(trat_p and trat_p[0] is not None and trat_p[0] < alfa)
-        d = res.dados.d
-        obs = d[["CEL", "y_orig"]].rename(columns={"CEL": "nivel"})
-        fig = gr.fig_medias(res.dados.celulas, ex["medias_orig"], ex["ep"], ex["ep"] * np.sqrt(ex["n"]), ex["n"], obs,
-                            c.letras if sig else None, cfg, rotulo_x="Tratamento" if cfg.idioma == "pt" else "Treatment",
-                            rotulo_y=ry)
-        figs.append((f"{_slug(res.variavel)}_todos_tratamentos", "Todos os tratamentos", fig))
-    return figs
+        obs = d[["CEL", "y_orig"]].rename(columns={"CEL": "nivel", "y_orig": "y"})
+        add("todos_tratamentos", "Médias — todos os tratamentos",
+            fg.SpecMedias(res.dados.celulas, ex["medias_orig"], ex["ep"], ex["ep"] * np.sqrt(ex["n"]), ex["n"], obs,
+                          c.letras, sig, "Tratamento" if idioma == "pt" else "Treatment", ry))
+    add("diagnostico", "Diagnóstico dos resíduos",
+        fg.SpecDiagnostico(res.residuos, res.ajustados, res.residuos_std, res.dados.d["CEL"].to_numpy()))
+    return itens
 
 
-def fig_diagnostico(res, cfg):
-    c = gr.ConfigGrafico(**{**cfg.__dict__, "largura_mm": 183, "altura_mm": None})
-    return gr.fig_diagnostico(res.residuos, res.ajustados, res.residuos_std, res.dados.d["CEL"], c)
+# ----------------------------------------------------------------------------
+# compatibilidade: figuras prontas com um tema
+# ----------------------------------------------------------------------------
+def figuras_para(res, tema=None, rotulo_y=None, perfil=None, idioma="pt", incluir_diagnostico=False):
+    t = tema if isinstance(tema, dict) else tm.resolver()
+    out = []
+    for it in specs_para(res, rotulo_y, perfil, idioma=idioma):
+        if it.spec.tipo == "diagnostico" and not incluir_diagnostico:
+            continue
+        tt = {**t, "tela.largura_mm": max(t["tela.largura_mm"], 183)} if it.spec.tipo == "diagnostico" else t
+        out.append((it.nome, it.titulo, fg.figura(it.spec, tt, idioma)))
+    return out
 
 
-def zip_figuras(itens, cfg, formatos=None, fechar=True) -> bytes:
-    """itens: lista de (pasta, nome, figura)."""
-    formatos = formatos or cfg.formatos
+def zip_figuras(itens, temas, formatos=("png", "svg"), idioma="pt") -> bytes:
+    """itens: lista de (pasta, nome, spec_ou_figura); temas: dict nome -> tema (ou tema único)."""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        for pasta, nome, fig in itens:
-            arquivos = gr.exportar(fig, cfg, formatos)
-            for ext, dados in arquivos.items():
+        for pasta, nome, obj in itens:
+            t = temas.get(nome, temas.get("__padrao__")) if isinstance(temas, dict) and "__padrao__" in temas else temas
+            fig = obj if hasattr(obj, "savefig") else fg.figura(obj, t, idioma)
+            for ext, dados in fg.exportar(fig, t, formatos).items():
                 caminho = f"{_slug(pasta)}/{ext}/{nome}.{ext}" if pasta else f"{ext}/{nome}.{ext}"
                 z.writestr(caminho, dados)
-            if fechar:
-                plt.close(fig)
+            plt.close(fig)
     return buf.getvalue()

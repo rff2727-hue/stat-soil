@@ -26,6 +26,10 @@ class Teste:
     ok: bool | None
     nota: str = ""
 
+    def __post_init__(self):
+        if self.ok is not None:
+            self.ok = bool(self.ok)        # numpy.bool_ -> bool (testes "is False" na interface)
+
 
 @dataclass
 class ResultadoPressupostos:
@@ -132,6 +136,8 @@ def avaliar(res, ajust, rstd, grupos, d, spec, qm_res, gl_res, y_orig=None, X_mo
         if bc and bc.get("sugestao"):
             rec += f"Sugestão: {bc['sugestao']}. "
         rec += "Considere também verificar valores discrepantes ou usar teste não paramétrico."
+    ok_n = None if ok_n is None else bool(ok_n)
+    ok_h = None if ok_h is None else bool(ok_h)
     return ResultadoPressupostos(testes, out, bc, ok_n, ok_h, rec)
 
 

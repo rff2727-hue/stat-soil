@@ -93,7 +93,7 @@ class Planilha:
         topo = self.lin
         for j, c in enumerate(cols):
             self.ws.write(topo, j, c, self.f(top=2, bottom=1, align="left" if j == 0 else "center",
-                                             font_color="#1A1A1A"))
+                                             font_color="#1A1A1A", bold=True))
         self.lin += 1
         n = len(df)
         for i, (idx, row) in enumerate(df.iterrows()):
@@ -152,12 +152,16 @@ class Planilha:
 
 
 # ============================================================================
-def _tabela_anova(res, idioma):
+def _tabela_anova(res, idioma, efeito=True):
     t = T[idioma]
     linhas = []
     for l in res.anova:
-        linhas.append({t["fonte"]: ("   " * l.nivel) + l.fonte, t["gl"]: l.gl, t["sq"]: l.sq, t["qm"]: l.qm,
-                       t["f"]: l.f, t["p"]: l.p, " ": textos.estrela(l.p) if l.p is not None else ""})
+        d = {t["fonte"]: ("   " * l.nivel) + l.fonte, t["gl"]: l.gl, t["sq"]: l.sq, t["qm"]: l.qm,
+             t["f"]: l.f, t["p"]: l.p, " ": textos.estrela(l.p) if l.p is not None else ""}
+        if efeito:
+            d["η²p"] = l.eta2p
+            d["ω²p"] = l.omega2p
+        linhas.append(d)
     df = pd.DataFrame(linhas).set_index(t["fonte"])
     return df
 
@@ -298,7 +302,7 @@ def gerar_excel(resultados, opcoes, idioma="pt", extras=None, dados_brutos=None,
         for aviso in r.avisos:
             A.texto("• " + aviso, cor="#A6461E", tamanho=9)
         A.tabela(_tabela_anova(r, idioma), legenda="Análise de variância" if idioma == "pt" else "Analysis of variance",
-                 formatos={t["gl"]: "int", t["p"]: "p"},
+                 formatos={t["gl"]: "int", t["p"]: "p", "η²p": "dec:3", "ω²p": "dec:3"},
                  nota="; ".join(f"{k_} = {_fmt_str(v_, 2, idioma)}" for k_, v_ in r.cv.items())
                       + f"; R² = {_fmt_str(r.r2, 3, idioma)}")
         if r.desdobramento:
@@ -377,12 +381,12 @@ def gerar_excel(resultados, opcoes, idioma="pt", extras=None, dados_brutos=None,
                                     if not isinstance(v_, bool))
                     linhas.append({"Posição": a.rank, "Modelo": a.nome if idioma == "pt" else CATALOGO[a.codigo].nome_en,
                                    "Equação": a.equacao(idioma), "R²": a.r2, "R² aj.": a.r2_aj, "AICc": a.aicc,
-                                   "ΔAICc": a.delta_aicc, "Peso de Akaike": a.peso, "p falta de ajuste": a.p_falta,
+                                   "ΔAICc": a.delta_aicc, "Peso de Akaike": a.peso, "Falta de ajuste": a.falta_ajuste(idioma, r.alfa),
                                    "Adequado": a.adequado, "Observação": a.motivo, "Parâmetros (± EP)": par,
                                    "Pontos notáveis": pts})
                 d = pd.DataFrame(linhas).set_index("Posição")
                 R.tabela(d, formatos={"R²": "dec:4", "R² aj.": "dec:4", "AICc": "dec:2", "ΔAICc": "dec:2",
-                                      "Peso de Akaike": "dec:3", "p falta de ajuste": "p"},
+                                      "Peso de Akaike": "dec:3"},
                          nota=(("Modelo indicado: " + fa.regressao.melhor.nome) if fa.regressao.melhor else "")
                               + (". " + fa.regressao.nota if fa.regressao.nota else ""))
         R.ws.set_column(2, 2, 52)
@@ -433,6 +437,46 @@ def gerar_excel(resultados, opcoes, idioma="pt", extras=None, dados_brutos=None,
         esc.index = p.rotulos_linhas
         esc.index.name = "Linha/Tratamento"
         Q.tabela(esc, legenda="Escores" if idioma == "pt" else "Scores", formatos={c_: "dec:3" for c_ in esc.columns[1:]})
+
+    # ---------------------------------------------------------------- Alternativas robustas
+    from . import robusto
+    A = None
+    for r in ok:
+        try:
+            alts = robusto.alternativas(r)
+        except Exception:
+            alts = []
+        if not alts:
+            continue
+        if A is None:
+            A = Planilha(wb, "Alternativas" if idioma == "pt" else "Robust tests", idioma, larguras={0: 34, 1: 34})
+            A.texto(("Alternativas à ANOVA quando os pressupostos falham: as combinações de tratamentos são tratadas "
+                     "como um único fator." if idioma == "pt" else
+                     "Alternatives to ANOVA when assumptions fail: treatment combinations are treated as one factor."),
+                    cor="#6B6B6B")
+            A.pular()
+        A.titulo(r.variavel, 12)
+        resumo = pd.DataFrame([{"Teste": a.teste, "Estatística": a.estatistica, "GL": a.gl, "p": a.p,
+                                "Pós-teste": a.posthoc} for a in alts]).set_index("Teste")
+        A.tabela(resumo, formatos={"Estatística": "dec:3", "p": "p"})
+        for a in alts:
+            A.tabela(a.tabela.set_index(a.tabela.columns[0]), legenda=f"{a.teste} — {a.posthoc}", nota=a.nota)
+            A.tabela(a.pares.set_index(a.pares.columns[0]),
+                     legenda="Comparações par a par" if idioma == "pt" else "Pairwise comparisons",
+                     formatos={"p ajustado": "p"})
+
+    # ---------------------------------------------------------------- Tabelas de análises complementares
+    abas_extra = {}
+    for item in extras.get("tabelas") or []:
+        aba = item["aba"][:31]
+        if aba not in abas_extra:
+            abas_extra[aba] = Planilha(wb, aba, idioma, larguras={0: 34})
+        Pe = abas_extra[aba]
+        if item.get("titulo"):
+            Pe.titulo(item["titulo"], 12)
+        tb = item["df"]
+        Pe.tabela(tb, nota=item.get("nota"), formatos=item.get("formatos") or
+                  {c: "p" for c in tb.columns if str(c) in ("p", "p ajustado")})
 
     # ---------------------------------------------------------------- Textos
     X = Planilha(wb, "Texto" if idioma == "pt" else "Text", idioma)

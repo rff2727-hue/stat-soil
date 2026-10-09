@@ -334,7 +334,31 @@ def dunnett(grupos, medias, var_dif, gl, alfa=0.05, controle=None, maiusculas=Fa
                                _ep_media(ep, k), controle=grupos[ic])
 
 
+def _ic_pares(res, alfa):
+    """IC das diferenças: simultâneo (Tukey/Bonferroni/Dunnett) ou individual (demais)."""
+    if not res.pares:
+        return res
+    k = len(res.grupos)
+    m = max(len(res.pares), 1)
+    for p in res.pares:
+        ep = p["ep_dif"]
+        if res.metodo == "tukey":
+            c = _q_crit(1 - alfa, k, res.gl) / math.sqrt(2)
+        elif res.metodo == "bonferroni":
+            c = stats.t.ppf(1 - alfa / (2 * m), res.gl)
+        elif res.metodo == "dunnett":
+            c = (res.dms / ep) if (res.dms and ep) else stats.t.ppf(1 - alfa / 2, res.gl)
+        else:
+            c = stats.t.ppf(1 - alfa / 2, res.gl)
+        p["ic_inf"], p["ic_sup"] = p["dif"] - c * ep, p["dif"] + c * ep
+    return res
+
+
 def comparar(metodo, grupos, medias, var_dif, gl, alfa=0.05, maiusculas=False, controle=None):
+    return _ic_pares(_comparar(metodo, grupos, medias, var_dif, gl, alfa, maiusculas, controle), alfa)
+
+
+def _comparar(metodo, grupos, medias, var_dif, gl, alfa=0.05, maiusculas=False, controle=None):
     var_dif = np.asarray(var_dif, float)
     if len(grupos) == 1:
         return ResultadoComparacao(metodo, list(grupos), np.asarray(medias, float),

@@ -1,3 +1,12 @@
-Roboto — Copyright 2011 The Roboto Project Authors (https://github.com/googlefonts/roboto-classic).
-Distribuída sob a SIL Open Font License, Version 1.1 (https://openfontlicense.org).
-Os arquivos .ttf são incluídos para que os gráficos usem Roboto mesmo em servidores sem a fonte instalada.
+Fontes incluídas para que as figuras usem a família escolhida mesmo em servidores sem as fontes instaladas.
+
+- Roboto — The Roboto Project Authors — SIL Open Font License 1.1
+- Inter — The Inter Project Authors — SIL Open Font License 1.1
+- Source Sans 3 — Adobe — SIL Open Font License 1.1
+- IBM Plex Sans / IBM Plex Mono — IBM Corp. — SIL Open Font License 1.1
+- Lato — Łukasz Dziedzic — SIL Open Font License 1.1
+- Open Sans — The Open Sans Project Authors — SIL Open Font License 1.1
+- Liberation Sans / Liberation Serif (métricas de Arial e Times New Roman) — Red Hat — SIL Open Font License 1.1
+
+Texto da licença: https://openfontlicense.org
+As famílias com eixo variável foram convertidas em instâncias estáticas (Light, Regular, Bold) com fontTools.

@@ -121,3 +121,82 @@ def pca(df: pd.DataFrame, variaveis: list, grupo=None, usar_medias=False) -> Res
             cargas[:, j] *= -1
             escores[:, j] *= -1
     return ResultadoPCA(nomes, escores, cargas, autov, expl, g, rot, base)
+
+
+# ============================================================================
+# Agrupamento hierárquico
+# ============================================================================
+@dataclass
+class ResultadoAgrupamento:
+    rotulos: list
+    ligacao: np.ndarray
+    metodo: str
+    cofenetica: float
+    corte: float | None
+    grupos: np.ndarray
+    distancias: pd.DataFrame
+    nomes_var: list
+
+
+def agrupamento(df: pd.DataFrame, variaveis: list, grupo: str, metodo="average", k_mojena=1.25):
+    """Agrupa tratamentos pelas médias padronizadas (distância euclidiana).
+    Corte pelo critério de Mojena (θ = média + k·DP das alturas de fusão)."""
+    from scipy.cluster import hierarchy as h
+    from scipy.spatial.distance import pdist, squareform
+    d = df[variaveis].apply(pd.to_numeric, errors="coerce")
+    g = df[grupo].astype(str)
+    med = d.groupby(g, sort=False).mean().dropna(axis=1, how="any")
+    Z = (med - med.mean()) / med.std(ddof=1)
+    Z = Z.loc[:, Z.std() > 0]
+    D = pdist(Z.to_numpy(), "euclidean")
+    L = h.linkage(D, method=metodo)
+    coph, _ = h.cophenet(L, D)
+    alturas = L[:, 2]
+    corte = float(alturas.mean() + k_mojena * alturas.std(ddof=1)) if len(alturas) > 1 else None
+    grupos = h.fcluster(L, corte, criterion="distance") if corte else np.ones(len(med), int)
+    dist = pd.DataFrame(squareform(D), index=med.index, columns=med.index)
+    nomes = {"average": "UPGMA", "ward": "Ward", "complete": "Ligação completa", "single": "Vizinho mais próximo"}
+    return ResultadoAgrupamento(list(med.index), L, nomes.get(metodo, metodo), float(coph), corte, grupos, dist,
+                                list(Z.columns))
+
+
+# ============================================================================
+# Análise de trilha (path analysis)
+# ============================================================================
+@dataclass
+class ResultadoTrilha:
+    dependente: str
+    explicativas: list
+    efeitos: pd.DataFrame        # linhas: variável explicativa; colunas: direto, via cada outra, total (r)
+    r2: float
+    residual: float
+    numero_condicao: float
+    vif: pd.Series
+    nota: str
+
+
+def trilha(df: pd.DataFrame, dependente: str, explicativas: list, usar_medias_por=None, k_crista=0.0):
+    d = df[[dependente] + explicativas].apply(pd.to_numeric, errors="coerce")
+    if usar_medias_por:
+        d = d.groupby(df[usar_medias_por].astype(str)).mean()
+    d = d.dropna()
+    R = d.corr().to_numpy()
+    Rxx = R[1:, 1:] + k_crista * np.eye(len(explicativas))
+    rxy = R[1:, 0]
+    p = np.linalg.solve(Rxx, rxy)
+    k = len(explicativas)
+    tab = pd.DataFrame(index=explicativas)
+    tab["Efeito direto"] = p
+    for j, nj in enumerate(explicativas):
+        tab[f"via {nj}"] = [R[1 + i, 1 + j] * p[j] if i != j else np.nan for i in range(k)]
+    tab["Total (r)"] = rxy
+    r2 = float(p @ rxy)
+    autov = np.linalg.eigvalsh(R[1:, 1:])
+    nc = float(autov.max() / max(autov.min(), 1e-12))
+    vif = pd.Series(np.diag(np.linalg.inv(R[1:, 1:])), index=explicativas)
+    nivel = "fraca" if nc < 100 else "moderada a forte" if nc < 1000 else "severa"
+    br = lambda v, d=3: f"{v:.{d}f}".replace(".", ",")
+    nota = (f"Coeficiente de determinação R² = {br(r2)}; efeito residual = {br(np.sqrt(max(1 - r2, 0)))}. "
+            f"Número de condição = {br(nc, 1)} (multicolinearidade {nivel})."
+            + (f" Trilha em crista com k = {k_crista:g}." if k_crista else ""))
+    return ResultadoTrilha(dependente, explicativas, tab, r2, float(np.sqrt(max(1 - r2, 0))), nc, vif, nota)

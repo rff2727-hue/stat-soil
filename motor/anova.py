@@ -50,6 +50,8 @@ class LinhaAnova:
     nivel: int = 0                # recuo na tabela
     termo: tuple | None = None
     erro: str | None = None       # nome do erro usado no teste
+    eta2p: float | None = None    # eta² parcial
+    omega2p: float | None = None  # ômega² parcial
 
     def as_dict(self):
         return dict(Fonte=("    " * self.nivel) + self.fonte, GL=self.gl, SQ=self.sq, QM=self.qm, F=self.f,
@@ -77,6 +79,8 @@ class Fatia:
     gl_num: int
     comparacao: cmp.ResultadoComparacao | None = None
     regressao: "reg.ResultadoRegressao | None" = None
+    ic_inf: np.ndarray | None = None
+    ic_sup: np.ndarray | None = None
     polinomial: list = field(default_factory=list)  # linhas da decomposição polinomial
     obs: pd.DataFrame | None = None   # observações (x, y_orig) para gráficos
 
@@ -172,7 +176,16 @@ class EstimadorUmEstrato:
         blocos = []
         Xc = _dummies(cod, c)
         nuis = {}
-        if spec.base == "DBC":
+        if spec.base == "DBC" and "AMB" in d:
+            partes = []
+            for amb in pd.unique(d["AMB"]):
+                sel = (d["AMB"] == amb).to_numpy()
+                b, lv = _codificar(d.loc[sel, "BL"], sorted(d.loc[sel, "BL"].unique(), key=_ord))
+                Z = np.zeros((len(d), max(len(lv) - 1, 0)))
+                Z[sel] = _soma_zero(b, len(lv))
+                partes.append(Z)
+            nuis["Blocos"] = np.hstack(partes) if partes else np.zeros((len(d), 0))
+        elif spec.base == "DBC":
             b, lv = _codificar(d["BL"], sorted(d["BL"].unique(), key=_ord))
             nuis["Blocos"] = _soma_zero(b, len(lv))
         if spec.base == "DQL":
@@ -547,10 +560,14 @@ def analisar(df: pd.DataFrame, spec: Especificacao, variavel: str, opcoes: Opcoe
     alfa_int = op.alfa_interacao or alfa
     dados = preparar(df, spec, variavel, op.transformacao)
     avisos = list(dados.avisos)
-    if spec.multiestrato:
+    if spec.multiestrato and dados.incompleto:
+        from .misto import anova_misto
+        est, linhas, cv, r2, res, ajust, h, qm_res = anova_misto(dados, alfa, _termos, _nome_termo, _K_termo)
+    elif spec.multiestrato:
         est, linhas, cv, r2, res, ajust, h, qm_res = _anova_multiestrato(dados, alfa)
     else:
         est, linhas, cv, r2, res, ajust, h, qm_res = _anova_um_estrato(dados, alfa)
+    _tamanhos_efeito(linhas, len(dados.d))
     d = dados.d
     y = d["y"].to_numpy(float)
     gl_res = est.gl_res
@@ -610,7 +627,71 @@ def analisar(df: pd.DataFrame, spec: Especificacao, variavel: str, opcoes: Opcoe
     if op.transformacao:
         avisos.append(f"Análise na escala transformada ({rotulo_transformacao(op.transformacao)}); médias apresentadas "
                       "na escala original com as letras do teste na escala transformada.")
+    res_obj.est = est
+    res_obj.opcoes = op
     return res_obj
+
+
+# ============================================================================
+# Contrastes definidos pelo usuário
+# ============================================================================
+def niveis_contraste(res, alvo="celulas"):
+    """Níveis aos quais os coeficientes se aplicam: 'celulas' (tratamentos) ou índice de fator."""
+    if alvo == "celulas":
+        return list(res.dados.celulas)
+    return list(res.dados.niveis[int(alvo)])
+
+
+def contrastes(res, definicoes, alvo="celulas"):
+    """definicoes: lista de (nome, {nivel: coeficiente}). Retorna DataFrame com estimativa, EP, IC, F, p
+    e a verificação de ortogonalidade entre os contrastes (com médias não ponderadas)."""
+    est = res.est
+    dados = res.dados
+    niveis = niveis_contraste(res, alvo)
+    if alvo == "celulas":
+        base = np.eye(len(dados.celulas))
+    else:
+        base = _K_medias(dados, int(alvo), {})
+    linhas, vetores = [], []
+    for nome, coefs in definicoes:
+        c = np.array([float(coefs.get(n, 0.0) or 0.0) for n in niveis])
+        if np.allclose(c, 0):
+            continue
+        soma = float(c.sum())
+        k = c @ base
+        estim = float(k @ est.m)
+        var = float(est.cov(k[None, :])[0, 0])
+        qm_e, gl = est.erro_combinado(k[None, :])
+        ep = math.sqrt(max(var, 0))
+        tcrit = stats.t.ppf(0.975, gl)
+        F = estim ** 2 / var if var > 0 else np.nan
+        n_med = float(np.mean(dados.d.groupby("CEL").size())) if alvo == "celulas" else \
+            float(len(dados.d) / len(niveis))
+        sq = n_med * estim ** 2 / float(c @ c) if alvo != "celulas" else n_med * estim ** 2 / float(c @ c)
+        linhas.append({"Contraste": nome, "Estimativa": estim, "EP": ep, "IC 95% inf.": estim - tcrit * ep,
+                       "IC 95% sup.": estim + tcrit * ep, "SQ": sq, "F": F, "GL erro": gl,
+                       "p": float(stats.f.sf(F, 1, gl)) if np.isfinite(F) else np.nan,
+                       "Soma dos coef.": soma})
+        vetores.append((nome, c))
+    df = pd.DataFrame(linhas)
+    orto = []
+    for a in range(len(vetores)):
+        for b in range(a + 1, len(vetores)):
+            prod = float(vetores[a][1] @ vetores[b][1])
+            orto.append((vetores[a][0], vetores[b][0], abs(prod) < 1e-9))
+    return df, orto
+
+
+def _tamanhos_efeito(linhas, N):
+    """eta² parcial e ômega² parcial de cada efeito, com o erro do seu estrato."""
+    erros = {l.fonte: l for l in linhas if l.tipo == "erro"}
+    for l in linhas:
+        if l.tipo in ("efeito", "contraste", "bloco") and l.sq is not None and l.erro in erros:
+            e = erros[l.erro]
+            sq_e, qm_e = e.sq, e.qm
+            l.eta2p = float(l.sq / (l.sq + sq_e)) if (l.sq + sq_e) > 0 else None
+            den = l.sq + (N - l.gl) * qm_e
+            l.omega2p = float(max((l.sq - l.gl * qm_e) / den, 0.0)) if den > 0 else None
 
 
 def _obs_fatia(dados, fator, cond):
@@ -653,6 +734,12 @@ def _fatia(dados, est, i, cond, op, alfa):
     fa = Fatia(fator=i, condicao=cond, niveis=niveis, medias=m, medias_orig=med_orig,
                ep_modelo=np.sqrt(np.diag(V)), ep_dados=ep_d, dp_dados=dp, n=n, var_dif=var_dif, gl=gl_e,
                qm_erro=qm_e, f=F, p=p, gl_num=q, obs=sub.assign(_linha=dados.d.loc[mask, "_linha"].to_numpy()))
+    if op.transformacao:
+        tq = stats.t.ppf(0.975, np.maximum(n - 1, 1))
+        fa.ic_inf, fa.ic_sup = med_orig - tq * ep_d, med_orig + tq * ep_d
+    else:
+        tq = stats.t.ppf(0.975, gl)
+        fa.ic_inf, fa.ic_sup = m - tq * fa.ep_modelo, m + tq * fa.ep_modelo
     f = spec.fatores[i]
     quant = f.quantitativo and k >= 3
     if (not quant) or op.comparar_quantitativos:

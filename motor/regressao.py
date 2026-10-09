@@ -38,24 +38,57 @@ class ModeloDef:
 
 
 CATALOGO = {
-    "linear": ModeloDef("linear", "Linear", "Linear", ["a", "b"], ["b"], True, familia="polinomial"),
-    "quadratico": ModeloDef("quadratico", "Quadrático", "Quadratic", ["a", "b", "c"], ["c"], True, familia="polinomial"),
-    "cubico": ModeloDef("cubico", "Cúbico", "Cubic", ["a", "b", "c", "d"], ["d"], True, familia="polinomial"),
-    "raiz": ModeloDef("raiz", "Raiz quadrada", "Square-root", ["a", "b", "c"], ["b", "c"], True),
-    "log": ModeloDef("log", "Logarítmico", "Logarithmic", ["a", "b"], ["b"], True),
+    # ---- resposta a doses (padrão)
+    "linear": ModeloDef("linear", "Linear", "Linear", ["a", "b"], ["b"], True, familia="dose"),
+    "quadratico": ModeloDef("quadratico", "Quadrático", "Quadratic", ["a", "b", "c"], ["c"], True, familia="dose"),
+    "cubico": ModeloDef("cubico", "Cúbico", "Cubic", ["a", "b", "c", "d"], ["d"], True, familia="dose"),
+    "raiz": ModeloDef("raiz", "Raiz quadrada", "Square-root", ["a", "b", "c"], ["b", "c"], True, familia="dose"),
+    "log": ModeloDef("log", "Logarítmico", "Logarithmic", ["a", "b"], ["b"], True, familia="dose"),
     "mitscherlich": ModeloDef("mitscherlich", "Exponencial assintótico (Mitscherlich)", "Asymptotic exponential (Mitscherlich)",
-                              ["a", "b", "c"], ["b", "c"], False),
-    "linear_plato": ModeloDef("linear_plato", "Linear-platô", "Linear-plateau", ["a", "b", "x₀"], ["b"], False),
-    "quadratico_plato": ModeloDef("quadratico_plato", "Quadrático-platô", "Quadratic-plateau", ["a", "b", "c"], ["c"], False),
-    "exponencial": ModeloDef("exponencial", "Exponencial", "Exponential", ["a", "b"], ["b"], False),
-    "potencia": ModeloDef("potencia", "Potência", "Power", ["a", "b"], ["b"], False, exige_positivo=True),
+                              ["a", "b", "c"], ["b", "c"], False, familia="dose"),
+    "linear_plato": ModeloDef("linear_plato", "Linear-platô", "Linear-plateau", ["a", "b", "x₀"], ["b"], False, familia="dose"),
+    "quadratico_plato": ModeloDef("quadratico_plato", "Quadrático-platô", "Quadratic-plateau", ["a", "b", "c"], ["c"], False,
+                                  familia="dose"),
+    "exponencial": ModeloDef("exponencial", "Exponencial", "Exponential", ["a", "b"], ["b"], False, familia="dose"),
+    "potencia": ModeloDef("potencia", "Potência", "Power", ["a", "b"], ["b"], False, exige_positivo=True, familia="dose"),
     "michaelis": ModeloDef("michaelis", "Hiperbólico (Michaelis-Menten)", "Hyperbolic (Michaelis-Menten)",
-                           ["y₀", "a", "b"], ["a"], False),
-    "logistico": ModeloDef("logistico", "Logístico (3P)", "Logistic (3P)", ["a", "b", "c"], ["b"], False),
+                           ["y₀", "a", "b"], ["a"], False, familia="dose"),
+    # ---- crescimento / acúmulo
+    "logistico": ModeloDef("logistico", "Logístico (3P)", "Logistic (3P)", ["a", "b", "c"], ["b"], False, familia="crescimento"),
+    "gompertz": ModeloDef("gompertz", "Gompertz", "Gompertz", ["a", "b", "c"], ["b", "c"], False, familia="crescimento"),
+    "weibull": ModeloDef("weibull", "Weibull (3P)", "Weibull (3P)", ["a", "b", "c"], ["b", "c"], False, familia="crescimento"),
+    # ---- isotermas de adsorção (x = concentração de equilíbrio; y = quantidade adsorvida)
+    "langmuir": ModeloDef("langmuir", "Langmuir", "Langmuir", ["Qmáx", "K"], ["Qmáx", "K"], False, familia="adsorcao"),
+    "freundlich": ModeloDef("freundlich", "Freundlich", "Freundlich", ["Kf", "1/n"], ["Kf", "1/n"], False,
+                            familia="adsorcao"),
+    "temkin": ModeloDef("temkin", "Temkin", "Temkin", ["B", "A"], ["B"], False, exige_positivo=True, familia="adsorcao"),
+    "sips": ModeloDef("sips", "Sips (Langmuir-Freundlich)", "Sips (Langmuir-Freundlich)", ["Qmáx", "K", "n"],
+                      ["Qmáx", "K"], False, familia="adsorcao"),
+    # ---- cinéticas de liberação, sorção e mineralização (x = tempo)
+    "primeira_ordem": ModeloDef("primeira_ordem", "Primeira ordem (Stanford & Smith; pseudo-1ª ordem)",
+                                "First order (Stanford & Smith; pseudo-first order)", ["q₀", "k"], ["q₀", "k"], False,
+                                familia="cinetica"),
+    "segunda_ordem": ModeloDef("segunda_ordem", "Pseudo-segunda ordem", "Pseudo-second order", ["qₑ", "k₂"], ["qₑ", "k₂"],
+                               False, familia="cinetica"),
+    "elovich": ModeloDef("elovich", "Elovich", "Elovich", ["α", "β"], ["α", "β"], False, familia="cinetica"),
+    "parabolica": ModeloDef("parabolica", "Difusão parabólica", "Parabolic diffusion", ["a", "b"], ["b"], True,
+                            familia="cinetica"),
+    "dois_compart": ModeloDef("dois_compart", "Dois compartimentos (1ª ordem dupla)", "Two-pool first order",
+                              ["C₁", "k₁", "C₂", "k₂"], ["C₁", "C₂"], False, familia="cinetica"),
 }
 
-PADRAO = ["linear", "quadratico", "cubico", "raiz", "log", "mitscherlich", "linear_plato", "quadratico_plato",
-          "exponencial", "potencia", "michaelis", "logistico"]
+FAMILIAS = {
+    "dose": "Resposta a doses",
+    "crescimento": "Crescimento e acúmulo",
+    "adsorcao": "Isotermas de adsorção",
+    "cinetica": "Cinéticas (liberação, sorção, mineralização)",
+}
+
+PADRAO = [c for c, m in CATALOGO.items() if m.familia == "dose"] + ["logistico"]
+
+
+def modelos_da_familia(familias):
+    return [c for c, m in CATALOGO.items() if m.familia in familias]
 
 
 def _f(codigo, x, p, desloc_log=0.0):
@@ -87,6 +120,29 @@ def _f(codigo, x, p, desloc_log=0.0):
         return p[0] + p[1] * x / (p[2] + x)
     if codigo == "logistico":
         return p[0] / (1 + np.exp(np.clip(-p[1] * (x - p[2]), -700, 700)))
+    if codigo == "gompertz":
+        return p[0] * np.exp(-p[1] * np.exp(np.clip(-p[2] * x, -700, 700)))
+    if codigo == "weibull":
+        return p[0] * (1 - np.exp(-np.power(np.clip(x, 0, None) / abs(p[1]), p[2])))
+    if codigo == "langmuir":
+        return p[0] * p[1] * x / (1 + p[1] * x)
+    if codigo == "freundlich":
+        return p[0] * np.power(np.clip(x, 0, None), p[1])
+    if codigo == "temkin":
+        return p[0] * np.log(np.clip(p[1] * x, 1e-300, None))
+    if codigo == "sips":
+        kx = np.power(np.clip(p[1] * x, 0, None), p[2])
+        return p[0] * kx / (1 + kx)
+    if codigo == "primeira_ordem":
+        return p[0] * (1 - np.exp(-p[1] * x))
+    if codigo == "segunda_ordem":
+        return p[0] ** 2 * p[1] * x / (1 + p[0] * p[1] * x)
+    if codigo == "elovich":
+        return (1 / p[1]) * np.log(np.clip(1 + p[0] * p[1] * x, 1e-300, None))
+    if codigo == "parabolica":
+        return p[0] + p[1] * np.sqrt(np.clip(x, 0, None))
+    if codigo == "dois_compart":
+        return p[0] * (1 - np.exp(-p[1] * x)) + p[2] * (1 - np.exp(-p[3] * x))
     raise ValueError(codigo)
 
 
@@ -103,6 +159,8 @@ def _X_linear(codigo, x, desloc_log=0.0):
         return np.column_stack([um, np.sqrt(x), x])
     if codigo == "log":
         return np.column_stack([um, np.log(x + desloc_log)])
+    if codigo == "parabolica":
+        return np.column_stack([um, np.sqrt(np.clip(x, 0, None))])
     raise ValueError(codigo)
 
 
@@ -133,12 +191,26 @@ class AjusteModelo:
     delta_aicc: float | None = None
     peso: float | None = None
     rank: int | None = None
+    cov: np.ndarray | None = None
+    gl_erro: float | None = None
 
     def prever(self, x):
         return _f(self.codigo, x, self.params, self.desloc_log)
 
     def equacao(self, idioma="pt", digitos=4):
         return equacao(self, idioma, digitos)
+
+    def falta_ajuste(self, idioma="pt", alfa=0.05):
+        """Veredito legível do teste de falta de ajuste (p alto = bom ajuste)."""
+        if self.p_falta is None or not np.isfinite(self.p_falta):
+            return "sem GL para testar" if idioma == "pt" else "no df to test"
+        if self.p_falta < 0.001:
+            ptxt = "p < 0,001" if idioma == "pt" else "P < 0.001"
+        else:
+            ptxt = ("p = " if idioma == "pt" else "P = ") + fmt_num(self.p_falta, 2, idioma)
+        if self.p_falta >= alfa:
+            return f"não detectada ✓ ({ptxt})" if idioma == "pt" else f"not detected ✓ ({ptxt})"
+        return f"detectada ✗ ({ptxt})" if idioma == "pt" else f"detected ✗ ({ptxt})"
 
 
 @dataclass
@@ -276,6 +348,11 @@ def _ajustar(cod, x, ybar, n, qm, gl, ss_puro, sq_trat, n_obs, alfa):
     aj = AjusteModelo(cod, md.nome, np.asarray(theta, float), ep, p_par, sq_d, r2, r2_aj, rmse, aicc, bic, gl_d, F,
                       p_f, convergiu and falta_ok and chave_sig and plaus, convergiu, "; ".join(motivos), desloc)
     aj.pontos = pontos_notaveis(aj, x)
+    try:
+        aj.cov = cov
+    except NameError:
+        aj.cov = None
+    aj.gl_erro = gl
     return aj
 
 
@@ -294,6 +371,11 @@ def _plausivel(cod, t, x):
         return False, "taxa ≤ 0"
     if cod == "michaelis" and t[2] <= 0:
         return False, "constante ≤ 0"
+    if cod == "dois_compart" and t[1] < t[3]:
+        # ordena: compartimento 1 = lábil (k maior) — reordenação é feita em pontos_notaveis
+        pass
+    if cod == "temkin" and t[1] <= 0:
+        return False, "A ≤ 0"
     if cod == "logistico" and not (xmin - (xmax - xmin) < t[2] < xmax + (xmax - xmin)):
         return False, "inflexão fora do domínio"
     return True, ""
@@ -308,6 +390,20 @@ def _jac(cod, x, t, h=1e-6):
         tm[j] -= dt
         J[:, j] = (_f(cod, x, tp) - _f(cod, x, tm)) / (2 * dt)
     return J
+
+
+_INF = np.inf
+LIMITES = {   # (inferiores, superiores) — garantem parâmetros com sentido físico
+    "langmuir": ([0, 0], [_INF, _INF]),
+    "sips": ([0, 0, 0.05], [_INF, _INF, 10]),
+    "freundlich": ([0, 0], [_INF, 5]),
+    "primeira_ordem": ([-_INF, 0], [_INF, _INF]),
+    "segunda_ordem": ([0, 0], [_INF, _INF]),
+    "elovich": ([0, 0], [_INF, _INF]),
+    "dois_compart": ([0, 0, 0, 0], [_INF, _INF, _INF, _INF]),
+    "weibull": ([-_INF, 1e-12, 0.05], [_INF, _INF, 20]),
+    "gompertz": ([-_INF, 0, 0], [_INF, _INF, _INF]),
+}
 
 
 def _ajustar_nl(cod, x, y, W):
@@ -358,17 +454,61 @@ def _ajustar_nl(cod, x, y, W):
         for c in (0.3, 0.5, 0.7):
             starts.append([y.max() * 1.05, 4 / xr, x.min() + c * xr])
             starts.append([y.max() * 1.05, -4 / xr, x.min() + c * xr])
+    elif cod == "gompertz":
+        for c in (1, 3, 8):
+            for b in (1, 3, 10):
+                starts.append([y.max() * 1.05, b, c / xr])
+    elif cod == "weibull":
+        for b in (0.3, 0.6, 1.0):
+            for c in (0.8, 1.5, 3.0):
+                starts.append([y.max() * 1.05, b * xr, c])
+    elif cod in ("langmuir", "sips"):
+        for k in (0.1, 1, 10, 100):
+            st0 = [max(y.max(), 1e-9) * 1.2, k / max(x.max(), 1e-9)]
+            starts.append(st0 + ([1.0] if cod == "sips" else []))
+            if cod == "sips":
+                starts.append(st0 + [0.6])
+    elif cod == "freundlich":
+        pos = (x > 0) & (y > 0)
+        if pos.sum() >= 2:
+            b, la = np.polyfit(np.log(x[pos]), np.log(y[pos]), 1)
+            starts.append([math.exp(la), b])
+        starts.append([max(y.max(), 1e-9) / max(x.max(), 1e-9) ** 0.5, 0.5])
+    elif cod == "temkin":
+        b, a = np.polyfit(np.log(x), y, 1, w=sw)
+        starts.append([b, math.exp(np.clip(a / b, -50, 50)) if b != 0 else 1.0])
+    elif cod in ("primeira_ordem", "segunda_ordem"):
+        for k in (0.3, 1, 3, 10):
+            q = max(y.max(), 1e-9) * 1.1
+            starts.append([q, k / xr] if cod == "primeira_ordem" else [q, k / (xr * q)])
+    elif cod == "elovich":
+        for a in (0.1, 1, 10, 100):
+            for b in (0.1, 1, 10):
+                starts.append([a * max(y.max(), 1e-9) / xr, b / max(y.max(), 1e-9)])
+    elif cod == "dois_compart":
+        q = max(y.max(), 1e-9)
+        for f in (0.2, 0.4):
+            for kr in (10, 30):
+                starts.append([f * q, kr / xr, (1 - f) * q * 1.2, 0.5 / xr])
     best = None
+
+    limites = LIMITES.get(cod)
 
     def resid(t):
         return sw * (y - _f(cod, x, t))
 
     for s0 in starts:
+        s0 = np.asarray(s0, float)
         try:
-            r = optimize.least_squares(resid, np.asarray(s0, float), method="lm", max_nfev=5000)
+            if limites is not None:
+                lo, hi = np.array(limites[0], float), np.array(limites[1], float)
+                s0 = np.clip(s0, lo + 1e-12, hi - 1e-12)
+                r = optimize.least_squares(resid, s0, bounds=(lo, hi), max_nfev=8000)
+            else:
+                r = optimize.least_squares(resid, s0, method="lm", max_nfev=5000)
         except Exception:
             try:
-                r = optimize.least_squares(resid, np.asarray(s0, float), max_nfev=5000)
+                r = optimize.least_squares(resid, s0, max_nfev=5000)
             except Exception:
                 continue
         if not np.all(np.isfinite(r.x)):
@@ -426,6 +566,49 @@ def pontos_notaveis(aj: AjusteModelo, x):
     elif c == "logistico":
         pts["assíntota (a)"] = t[0]
         pts["x no ponto de inflexão (c)"] = t[2]
+    elif c == "gompertz" and t[1] > 0 and t[2] > 0:
+        pts["assíntota (a)"] = t[0]
+        pts["x no ponto de inflexão"] = math.log(t[1]) / t[2]
+        pts["y no ponto de inflexão"] = t[0] / math.e
+    elif c == "weibull":
+        pts["assíntota (a)"] = t[0]
+        pts["escala (b)"] = abs(t[1])
+        pts["forma (c)"] = t[2]
+        pts["x para 50% da assíntota"] = abs(t[1]) * math.log(2) ** (1 / t[2]) if t[2] > 0 else np.nan
+    elif c == "langmuir" and t[1] > 0:
+        pts["capacidade máxima de adsorção (Qmáx)"] = t[0]
+        pts["constante de afinidade (K)"] = t[1]
+        pts["x para 50% de Qmáx (1/K)"] = 1 / t[1]
+    elif c == "freundlich":
+        pts["Kf"] = t[0]
+        pts["1/n (heterogeneidade)"] = t[1]
+    elif c == "sips":
+        pts["capacidade máxima de adsorção (Qmáx)"] = t[0]
+        pts["K"] = t[1]
+        pts["n (heterogeneidade)"] = t[2]
+    elif c == "temkin":
+        pts["B (relacionado ao calor de adsorção)"] = t[0]
+        pts["A (constante de ligação)"] = t[1]
+    elif c == "primeira_ordem" and t[1] > 0:
+        pts["potencial (q₀ ou N₀)"] = t[0]
+        pts["k (taxa)"] = t[1]
+        pts["meia-vida (ln 2/k)"] = math.log(2) / t[1]
+    elif c == "segunda_ordem" and t[1] > 0 and t[0] > 0:
+        pts["qₑ (equilíbrio)"] = t[0]
+        pts["taxa inicial h = k₂qₑ²"] = t[1] * t[0] ** 2
+        pts["meia-vida 1/(k₂qₑ)"] = 1 / (t[1] * t[0])
+    elif c == "elovich":
+        pts["α (taxa inicial)"] = t[0]
+        pts["β"] = t[1]
+    elif c == "parabolica":
+        pts["b (taxa de difusão)"] = t[1]
+    elif c == "dois_compart":
+        (c1, k1), (c2, k2) = sorted([(t[0], t[1]), (t[2], t[3])], key=lambda z: -z[1])
+        pts["compartimento lábil (C₁)"] = c1
+        pts["k lábil"] = k1
+        pts["compartimento recalcitrante (C₂)"] = c2
+        pts["k recalcitrante"] = k2
+        pts["potencial total (C₁ + C₂)"] = c1 + c2
     return pts
 
 
@@ -489,4 +672,55 @@ def equacao(aj: AjusteModelo, idioma="pt", digitos=4):
         return f"ŷ = {a} {F(t[1])}x/({fmt_num(t[2], digitos, idioma)} + x)"
     if c == "logistico":
         return f"ŷ = {a}/(1 + e^(−{fmt_num(t[1], digitos, idioma)}(x − {fmt_num(t[2], digitos, idioma)})))"
+    n_ = lambda v: fmt_num(v, digitos, idioma)
+    if c == "gompertz":
+        return f"ŷ = {a}·exp(−{n_(t[1])}·e^(−{n_(t[2])}x))"
+    if c == "weibull":
+        return f"ŷ = {a}·[1 − e^(−(x/{n_(abs(t[1]))})^{n_(t[2])})]"
+    if c == "langmuir":
+        return f"ŷ = {a}·{n_(t[1])}x/(1 + {n_(t[1])}x)"
+    if c == "freundlich":
+        return f"ŷ = {a}·x^{n_(t[1])}"
+    if c == "temkin":
+        return f"ŷ = {a}·ln({n_(t[1])}x)"
+    if c == "sips":
+        return f"ŷ = {a}·({n_(t[1])}x)^{n_(t[2])}/[1 + ({n_(t[1])}x)^{n_(t[2])}]"
+    if c == "primeira_ordem":
+        return f"ŷ = {a}·(1 − e^(−{n_(t[1])}x))"
+    if c == "segunda_ordem":
+        return f"ŷ = {n_(t[0] ** 2 * t[1])}x/(1 + {n_(t[0] * t[1])}x)"
+    if c == "elovich":
+        return f"ŷ = {n_(1 / t[1])}·ln(1 + {n_(t[0] * t[1])}x)"
+    if c == "parabolica":
+        return f"ŷ = {a} {F(t[1])}√x"
+    if c == "dois_compart":
+        return f"ŷ = {a}(1 − e^(−{n_(t[1])}x)) + {n_(t[2])}(1 − e^(−{n_(t[3])}x))"
     return ""
+
+
+# ============================================================================
+# Máxima eficiência econômica
+# ============================================================================
+def mee(aj: AjusteModelo, preco_insumo: float, preco_produto: float, xmin: float, xmax: float, n=4001):
+    """Dose de máxima eficiência econômica: maximiza receita líquida
+    L(x) = preço_produto·f(x) − preço_insumo·x no intervalo estudado.
+    Retorna dict com x, y, receita líquida, razão de preços e se o ótimo ficou na borda."""
+    if preco_produto <= 0:
+        return None
+    xs = np.linspace(xmin, xmax, n)
+    ys = aj.prever(xs)
+    L = preco_produto * ys - preco_insumo * xs
+    i = int(np.nanargmax(L))
+    # refinamento local
+    if 0 < i < n - 1:
+        res = optimize.minimize_scalar(lambda x: -(preco_produto * float(aj.prever(np.array([x]))[0]) - preco_insumo * x),
+                                       bounds=(xs[i - 1], xs[i + 1]), method="bounded")
+        x_ot = float(res.x)
+    else:
+        x_ot = float(xs[i])
+    y_ot = float(aj.prever(np.array([x_ot]))[0])
+    # máxima eficiência técnica numérica (para comparação)
+    j = int(np.nanargmax(ys))
+    return dict(x=x_ot, y=y_ot, receita_liquida=preco_produto * y_ot - preco_insumo * x_ot,
+                razao=preco_insumo / preco_produto, borda=(i == 0 or i == n - 1),
+                x_met=float(xs[j]), y_met=float(ys[j]))

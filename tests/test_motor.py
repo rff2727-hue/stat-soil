@@ -169,3 +169,64 @@ def test_saidas_excel_e_figuras():
     assert figs
     arq = gr.exportar(figs[0][2], gr.ConfigGrafico(), ("png", "svg"))
     assert arq["png"][:4] == b"\x89PNG" and b"<svg" in arq["svg"][:500]
+
+
+# ----------------------------------------------------------------------------
+# v2.0
+# ----------------------------------------------------------------------------
+def test_tabelas_excel_word():
+    from motor import tabelas
+    import zipfile
+    df, spec, resp = ex.fatorial()
+    t = exportar._tabela_anova(analisar(df, spec, resp[0]), "pt")
+    x = tabelas.tabela_xlsx(t, "Tabela 1", "nota")
+    d = tabelas.tabela_docx(t, "Tabela 1", "nota")
+    xml = zipfile.ZipFile(__import__("io").BytesIO(d)).read("word/document.xml").decode()
+    assert 'w:sz="8"' in xml and 'w:sz="4"' in xml       # 1,0 pt e 0,5 pt
+    assert x[:2] == b"PK"
+
+
+def test_tema_json_ida_e_volta():
+    from motor import tema as tm
+    aj = {"fonte.familia": "Inter", "eixos.y_max": 10.0, "grupos.cores": {"A": "#000000"}, "inexistente": 1}
+    nome, params, ign = tm.de_json(tm.para_json(aj, "x"))
+    assert params == {k: v for k, v in aj.items() if k != "inexistente"} and ign == ["inexistente"]
+
+
+def test_novos_modelos_recuperam_parametros():
+    from motor.regressao import ajustar_modelos, modelos_da_familia, _f
+    casos = {"langmuir": (np.array([0, 2, 5, 10, 20, 40, 80.]), [350, 0.08], "adsorcao"),
+             "primeira_ordem": (np.array([0, 7, 14, 28, 56, 84, 112.]), [120, 0.03], "cinetica"),
+             "elovich": (np.array([0.5, 1, 2, 4, 8, 24, 48.]), [20, 0.15], "cinetica"),
+             "gompertz": (np.array([0, 10, 20, 30, 40, 60, 80, 100.]), [50, 6, 0.08], "crescimento")}
+    for cod, (x, par, fam) in casos.items():
+        y = _f(cod, x, par)
+        r = ajustar_modelos(x, y, np.full(len(x), 4), 1e-6, 20, 1e-9, modelos=modelos_da_familia([fam]))
+        a = [m for m in r.ajustes if m.codigo == cod][0]
+        assert np.allclose(a.params, par, rtol=1e-3), cod
+
+
+def test_figuras_todos_os_tipos_e_tamanho_exato():
+    from PIL import Image
+    import io as _io
+    from motor import figuras as fg, tema as tm, multivariada as mv
+    df = pd.read_excel(REF)
+    spec = Especificacao("DBC", "subdividida", [Fator("FONTE", "Fonte", 1), Fator("PROF", "Camada", 2)], bloco="REP")
+    r = analisar(df, spec, "K mg/dm²")
+    itens = relatorio.specs_para(r, "K", perfil=1)
+    tipos = {it.spec.tipo for it in itens}
+    assert {"grupos", "perfil", "diagnostico"} <= tipos
+    for tipo_m in ("pontos", "barras", "box", "violino", "raincloud", "beeswarm"):
+        df2, s2, rs = ex.dbc()
+        sp = relatorio.specs_para(analisar(df2, s2, rs[0]))[0].spec
+        png = fg.gerar_arquivo(sp, tm.resolver({"medias.tipo": tipo_m, "tela.dpi": 300}), "png")
+        w, h = Image.open(_io.BytesIO(png)).size
+        assert abs(w - round(89 / 25.4 * 300)) <= 2      # largura exportada = largura pedida
+    c = mv.correlacoes(df, ["pH CaCl2", "Ca2+", "Mg2+", "K mg/dm²"])
+    p = mv.pca(df, ["pH CaCl2", "Ca2+", "Mg2+", "K mg/dm²"], grupo="FONTE")
+    painel = fg.gerar_painel([(itens[0].spec, tm.resolver()), (fg.SpecCorrelacao(c.R, c.P, c.nomes), tm.resolver()),
+                              (fg.SpecPCA(p.escores, p.cargas, p.nomes, p.grupos, p.explicada), tm.resolver()), (None, None)],
+                             2, 2, tm.resolver(), largura_mm=183, fmt="svg")
+    assert b"<svg" in painel[:500]
+    quebra = fg.gerar_arquivo(itens[1].spec, tm.resolver({"eixos.quebra_de": 30, "eixos.quebra_ate": 40}), "pdf")
+    assert quebra[:4] == b"%PDF"

@@ -69,10 +69,11 @@ def instrucoes(base, estrutura):
         "subdividida": [
             "Cada linha é uma subparcela. A coluna de bloco (DBC) ou repetição (DIC) identifica a parcela junto com o fator da parcela.",
             "Em parcelas subdivididas no tempo ou no espaço (épocas, camadas de solo), a época/camada é o fator da subparcela.",
-            "Dados completos são exigidos: todas as combinações bloco × parcela × subparcela devem ter valor.",
+            "Todas as combinações bloco × parcela × subparcela devem ter uma linha; valores perdidos são aceitos "
+            "(célula vazia) e, nesse caso, a análise usa modelo misto (REML).",
             "Em DIC, numere as repetições de 1 a r dentro de cada tratamento da parcela.",
         ],
-        "subsubdividida": ["Cada linha é uma sub-subparcela; dados completos são exigidos."],
+        "subsubdividida": ["Cada linha é uma sub-subparcela; valores perdidos (célula vazia) levam a análise ao modelo misto (REML)."],
         "faixas": ["Cada linha é uma interseção das faixas; dados completos são exigidos."],
     }
     if base == "DQL":

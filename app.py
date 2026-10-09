@@ -8,19 +8,22 @@ import io
 import traceback
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import streamlit as st
 
 from motor import __version__
-from motor import exportar, graficos as gr, multivariada as mv, relatorio, templates, textos
+from motor import exportar, multivariada as mv, projeto, relatorio, relatorio_docx, templates, textos, tema as tm
 from motor.anova import Opcoes, analisar
 from motor.comparacoes import METODOS
 from motor.exemplos import exemplo_para
 from motor.modelo import (BASES, ESTRUTURAS, ErroDelineamento, Especificacao, Fator, TRANSFORMACOES,
                           rotulo_transformacao, sugerir_colunas)
-from motor.regressao import CATALOGO, PADRAO
+from motor.regressao import CATALOGO, FAMILIAS, modelos_da_familia
+import ui_analises as ua
+import ui_estudio
+from ui_comum import (botoes_figura, catalogo, fmt_tabela, iniciar_estado, nova_versao, previa, rotulo_item, ss,
+                      tabela_ui, tema_base)
 
 RAIZ = Path(__file__).resolve().parent
 st.set_page_config(page_title="Estatística Experimental", page_icon=str(RAIZ / "assets" / "icone.png")
@@ -31,86 +34,223 @@ st.set_page_config(page_title="Estatística Experimental", page_icon=str(RAIZ / 
 # ============================================================================
 CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,300;0,400;0,500;1,400&display=swap');
-html, body, [class*="css"], .stMarkdown, .stText, button, input, textarea, select, label {
-  font-family: 'Roboto', sans-serif !important; }
-h1, h2, h3, h4 { font-family: 'Roboto', sans-serif !important; font-weight: 400 !important; color: #3E2A1E; }
-h1 { letter-spacing: -0.3px; }
-strong, b { font-weight: 500; }
-.faixa-topo { height: 5px; border-radius: 3px; margin: 0.9rem 0 1.0rem 0;
-  background: linear-gradient(90deg, #5B3A29 0%, #A6461E 30%, #D29A1C 55%, #3E8A45 80%, #2878A8 100%); }
-.sub { color: #6B6B6B; font-size: 0.98rem; margin-top: -0.6rem; }
-.papel { display:inline-block; padding: 2px 8px; margin: 2px 4px 2px 0; border-radius: 4px; font-size: 0.82rem;
-  border: 1px solid #D9CFC4; }
-table.esquema { border-collapse: collapse; font-size: 0.82rem; margin: 0.4rem 0 0.6rem 0; }
-table.esquema th { font-weight: 400; padding: 4px 10px; border-top: 2px solid #3E2A1E; border-bottom: 1px solid #3E2A1E; }
-table.esquema td { padding: 3px 10px; color: #333; }
-table.esquema tr:last-child td { border-bottom: 2px solid #3E2A1E; }
-.ok { color: #3E8A45; } .falha { color: #A6461E; }
-div[data-testid="stMetricValue"] { font-weight: 300; }
+:root { --fundo:#2B2925; --topo:#23211E; --painel:#33302B; --borda:#4A463F; --texto:#EFE8D8; --mudo:#A89F8F;
+  --ambar:#F2A33A; --verde:#9AD48A; --sombra:#1A1816; }
+.mono, .marca, .marca-sub, .rotulo-mono, .leitura-rot, .leitura-val, .leitura-sub, .secao-tit {
+  font-family: 'JetBrains Mono', ui-monospace, monospace !important; }
+.marca { font-weight: 700; font-size: 26px; letter-spacing: 0.14em; color: var(--ambar); line-height: 1.1; }
+.marca-sub { font-size: 12px; color: var(--mudo); margin-top: 6px; letter-spacing: 0.04em; }
+.faixa { display: flex; flex-direction: column; gap: 3px; margin: 14px 0 20px 0; }
+.faixa div { height: 5px; }
+h1, h2, h3, h4 { letter-spacing: 0.06em; }
+h4 { font-size: 1.0rem !important; text-transform: uppercase; }
+strong, b { font-weight: 600; }
+.secao-tit { font-size: 14px; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; margin: 10px 0 6px 0;
+  color: var(--texto); }
+.secao-tit span { color: var(--ambar); }
+/* botões */
+button[data-testid="stBaseButton-primary"] { background: var(--ambar) !important; color: #23211E !important;
+  border: 2px solid var(--sombra) !important; box-shadow: 4px 4px 0 var(--sombra); min-height: 46px;
+  font-family: 'JetBrains Mono', monospace !important; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+button[data-testid="stBaseButton-primary"] p { font-weight: 700; }
+button[data-testid="stBaseButton-primary"]:hover { background: #FFB54D !important; }
+button[data-testid="stBaseButton-primary"]:active { transform: translate(2px, 2px); box-shadow: 2px 2px 0 var(--sombra); }
+button[data-testid="stBaseButton-secondary"] { border: 2px solid var(--borda) !important; background: transparent !important;
+  font-family: 'JetBrains Mono', monospace !important; letter-spacing: 0.01em; min-height: 40px; }
+button[data-testid="stBaseButton-secondary"] p, button[data-testid="stBaseButton-primary"] p { font-size: 13px;
+  white-space: normal; line-height: 1.25; }
+button[data-testid="stBaseButton-secondary"]:hover { border-color: var(--ambar) !important; color: var(--ambar) !important; }
+div[data-testid="stDownloadButton"] button { min-width: 96px; }
+/* abas */
+div[role="tablist"] { gap: 6px; flex-wrap: wrap; border-bottom: none !important; }
+div[data-testid="stTab"] { border: 2px solid var(--borda); padding: 7px 14px !important; margin: 0 !important; }
+div[data-testid="stTab"] p { font-family: 'JetBrains Mono', monospace !important; font-size: 13px !important;
+  text-transform: uppercase; letter-spacing: 0.08em; }
+div[data-testid="stTab"]:hover { border-color: var(--ambar); }
+div[data-testid="stTab"][aria-selected="true"] { background: var(--ambar); border-color: var(--ambar); }
+div[data-testid="stTab"][aria-selected="true"] p { color: #23211E !important; font-weight: 700; }
+div[data-testid="stTab"]::after, div[data-testid="stTab"]::before { display: none !important; }
+/* sub-abas (dentro do conteúdo): mais discretas */
+div[data-testid="stTabs"] div[data-testid="stTabs"] div[data-testid="stTab"] { border-width: 1px; padding: 5px 11px !important; }
+div[data-testid="stTabs"] div[data-testid="stTabs"] div[data-testid="stTab"] p { font-size: 12px !important; }
+/* mostradores numéricos */
+.leitura { background: var(--painel); border: 2px solid var(--borda); padding: 14px 16px 12px 16px; display: flex;
+  flex-direction: column; gap: 6px; min-height: 104px; }
+.leitura-rot { font-size: 11px; letter-spacing: 0.14em; color: var(--mudo); text-transform: uppercase; }
+.leitura-val { font-size: 34px; line-height: 1.05; color: var(--ambar); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }
+.leitura-sub { font-size: 12px; color: var(--mudo); }
+.leitura.ok .leitura-val, .leitura.ok .leitura-sub { color: var(--verde); }
+.leitura.alerta .leitura-val, .leitura.alerta .leitura-sub { color: #E07B2E; }
+/* figuras em cartão branco */
+div[data-testid="stImage"] img { background: #FFFFFF; padding: 10px; border: 2px solid var(--borda); }
+.rotulo-mono { font-size: 0.72rem; letter-spacing: 0.12em; color: var(--mudo); margin: 0.6rem 0 0.35rem 0; }
+.rotulo-mono span { color: var(--ambar); }
+/* expansores e painéis */
+div[data-testid="stExpander"] details { border: 2px solid var(--borda) !important; background: var(--painel); }
+div[data-testid="stExpander"] summary p { font-family: 'JetBrains Mono', monospace; font-size: 13px; letter-spacing: 0.04em; }
+section[data-testid="stSidebar"] h3 { font-size: 12px !important; letter-spacing: 0.14em; color: var(--mudo);
+  text-transform: uppercase; margin-top: 0.6rem; }
+section[data-testid="stSidebar"] h3 span.n { color: var(--ambar); }
+/* esquema da planilha */
+.papel { display:inline-block; padding: 2px 8px; margin: 2px 4px 2px 0; font-size: 0.8rem; color: #23211E;
+  font-family: 'JetBrains Mono', monospace; }
+table.esquema { border-collapse: collapse; font-size: 0.82rem; margin: 0.4rem 0 0.6rem 0;
+  font-family: 'JetBrains Mono', monospace; }
+table.esquema th { font-weight: 500; padding: 4px 10px; color: #23211E; border-top: 2px solid var(--texto);
+  border-bottom: 1px solid var(--texto); }
+table.esquema td { padding: 3px 10px; color: var(--texto); }
+table.esquema tr:last-child td { border-bottom: 2px solid var(--texto); }
+[data-testid="stElementToolbar"] { display: none !important; }
 </style>
 """
 st.markdown(CSS, unsafe_allow_html=True)
+iniciar_estado()
 
-logo = RAIZ / "assets" / "logo.png"
-c_logo, c_tit = st.columns([1, 9]) if logo.exists() else (None, st.container())
-if logo.exists():
-    c_logo.image(str(logo), width="stretch")
-with c_tit:
-    st.markdown("# Estatística Experimental")
-    st.markdown('<div class="sub">Análise de experimentos agronômicos — ANOVA, pressupostos, testes de médias, '
-                'regressão, correlações e PCA, com tabelas e gráficos prontos para publicação</div>',
-                unsafe_allow_html=True)
-st.markdown('<div class="faixa-topo"></div>', unsafe_allow_html=True)
+_logo = RAIZ / "assets" / "logo.png"
+_logo_html = ""
+if _logo.exists():
+    import base64
+    _logo_html = (f"<img src='data:image/png;base64,{base64.b64encode(_logo.read_bytes()).decode()}' "
+                  "style='height:44px;margin-right:16px;vertical-align:middle;background:#EFE8D8;padding:4px'>")
+st.html(f"""
+<div style="display:flex;align-items:center">{_logo_html}<div class="marca">ESTATÍSTICA·EXPERIMENTAL</div></div>
+<div class="marca-sub">v{__version__} / motor determinístico · ANOVA, pressupostos, médias, regressão, multivariada
+ — tabelas e figuras prontas para publicação</div>
+<div class="faixa" aria-hidden="true"><div style="background:#C4502A"></div><div style="background:#E07B2E"></div>
+<div style="background:#F2A33A"></div><div style="background:#E8C547"></div></div>""")
 
-ss = st.session_state
-for k, v in dict(df=None, nome_arquivo=None, resultados={}, config_exec=None, transf_var={}, modelo_escolhido={},
-                 rotulos_y={}, extras={}, cache_figs={}).items():
-    ss.setdefault(k, v)
+
+def titulo_secao(n, texto):
+    st.html(f"<div class='secao-tit'><span>{n:02d} /</span> {texto}</div>")
+
 
 # ============================================================================
-# Barra lateral: delineamento e opções
+# Barra lateral
 # ============================================================================
+def abrir_projeto():
+    """Callback do envio de projeto: restaura dados, delineamento, opções e estilos."""
+    arq = ss.get("w_projeto")
+    if arq is None:
+        return
+    try:
+        df, nome, config, estado = projeto.carregar(arq.getvalue())
+    except Exception as e:
+        ss._erro_projeto = f"Não foi possível abrir o projeto: {e}"
+        return
+    ss.df, ss.nome_arquivo = df, nome
+    for k, v in estado.items():
+        if v is not None:
+            ss[k] = v
+    ss.tema_preset = estado.get("tema_preset") or ss.tema_preset
+    sp, op = config["spec"], config["opcoes"]
+    limpar_mapeamento()
+    # widgets da barra lateral
+    ss.base, ss.estrutura = sp.base, sp.estrutura
+    ss.w_alfa, ss.w_metodo, ss.w_transf = op.alfa, op.metodo, op.transformacao or "nenhuma"
+    ss.w_comp_q, ss.w_alfa_int = op.comparar_quantitativos, op.alfa_interacao or op.alfa
+    if op.modelos_regressao:
+        ss.w_familias = sorted({CATALOGO[m].familia for m in op.modelos_regressao if m in CATALOGO}) or ["dose"]
+        ss.w_modelos = [m for m in op.modelos_regressao if m in CATALOGO]
+        ss._familias_ant = modelos_da_familia(ss.w_familias)
+    # widgets do mapeamento de colunas
+    if sp.bloco:
+        ss[K("w_bloco")] = sp.bloco
+    if sp.linha:
+        ss[K("w_lin")], ss[K("w_col")] = sp.linha, sp.coluna
+    if sp.tratamento:
+        ss[K("w_trat")] = sp.tratamento
+    cols = [f.coluna for f in sp.fatores]
+    if sp.estrutura == "simples":
+        ss[K("w_f1")] = cols[0]
+    elif sp.estrutura in ("fatorial", "fatorial_adicional"):
+        ss[K("w_fat")] = cols
+    elif sp.estrutura == "faixas":
+        ss[K("w_fa")], ss[K("w_fb")] = cols[0], cols[1]
+    else:
+        for n in (1, 2, 3):
+            ss[K(f"w_nivel{n}")] = [f.coluna for f in sp.fatores if f.estrato == n]
+    for f in sp.fatores:
+        ss[K(f"rot_{f.coluna}")], ss[K(f"q_{f.coluna}")] = f.rotulo, f.quantitativo
+        if f.quantitativo:
+            ss[K(f"un_{f.coluna}")] = f.unidade or ""
+    ss[K("w_resp")] = list(config["respostas"])
+    ss[K("w_separar")] = config.get("separar") or "(nenhuma)"
+    ss._executar_projeto = config
+    ss.aba = "Resultados"
+
+
 with st.sidebar:
-    st.markdown("### 1. Delineamento")
+    st.markdown("### <span class='n'>01 /</span> Delineamento", unsafe_allow_html=True)
     base = st.radio("Casualização", list(BASES), index=1, format_func=lambda b: BASES[b], key="base")
     estruturas_validas = [e for e in ESTRUTURAS if not (base == "DQL" and e in ("subdividida", "subsubdividida", "faixas"))
                           and not (base == "DIC" and e == "faixas")]
     estrutura = st.selectbox("Estrutura dos tratamentos", estruturas_validas, format_func=lambda e: ESTRUTURAS[e],
                              key="estrutura")
-    st.markdown("### 2. Análise")
-    alfa = st.select_slider("Nível de significância (α)", [0.01, 0.05, 0.10], value=0.05)
-    metodo = st.selectbox("Teste de médias", list(METODOS), format_func=lambda m: METODOS[m])
-    transf = st.selectbox("Transformação (todas as variáveis)", list(TRANSFORMACOES),
-                          format_func=lambda t: TRANSFORMACOES[t],
+    st.markdown("### <span class='n'>02 /</span> Análise", unsafe_allow_html=True)
+    ss.setdefault("w_alfa", 0.05)
+    alfa = st.select_slider("Nível de significância (α)", [0.01, 0.05, 0.10], key="w_alfa")
+    metodo = st.selectbox("Teste de médias", list(METODOS), format_func=lambda m: METODOS[m], key="w_metodo")
+    ss.setdefault("w_transf", "nenhuma")
+    transf = st.selectbox("Transformação (todas as variáveis)", ["nenhuma"] + [t for t in TRANSFORMACOES if t],
+                          format_func=lambda t: TRANSFORMACOES[None if t == "nenhuma" else t], key="w_transf",
                           help="Também é possível aplicar a transformação sugerida pelo Box-Cox em cada variável, "
                                "na aba Pressupostos.")
+    transf = None if transf == "nenhuma" else transf
+    ss.setdefault("w_familias", ["dose"])
+    familias = st.multiselect("Famílias de modelos de regressão", list(FAMILIAS), key="w_familias",
+                              format_func=lambda f: FAMILIAS[f],
+                              help="Isotermas: x = concentração de equilíbrio. Cinéticas: x = tempo de incubação.")
     with st.expander("Opções avançadas"):
-        comparar_q = st.toggle("Aplicar também teste de médias a fatores quantitativos", value=False)
-        alfa_int = st.select_slider("α para desdobrar interações", [0.01, 0.05, 0.10], value=alfa)
-        modelos = st.multiselect("Modelos de regressão candidatos", PADRAO, default=PADRAO,
+        comparar_q = st.toggle("Aplicar também teste de médias a fatores quantitativos", key="w_comp_q")
+        ss.setdefault("w_alfa_int", alfa)
+        alfa_int = st.select_slider("α para desdobrar interações", [0.01, 0.05, 0.10], key="w_alfa_int")
+        candidatos = modelos_da_familia(familias) or modelos_da_familia(["dose"])
+        if ss.get("_familias_ant") != candidatos or "w_modelos" not in ss:
+            ss.w_modelos = candidatos
+            ss._familias_ant = candidatos
+        modelos = st.multiselect("Modelos candidatos", candidatos, key="w_modelos",
                                  format_func=lambda c: CATALOGO[c].nome)
-        com_ep = st.toggle("Tabelas com média ± erro-padrão", value=True)
-    st.markdown("### 3. Gráficos")
-    largura = st.selectbox("Largura", list(gr.LARGURAS), index=0)
-    estilo_g = st.radio("Estilo das médias", ["pontos", "barras"], horizontal=True,
-                        format_func=lambda s: {"pontos": "Pontos", "barras": "Barras"}[s])
-    erro_g = st.radio("Barra de erro", ["ep", "dp", "ic95"], horizontal=True,
-                      format_func=lambda s: {"ep": "Erro-padrão", "dp": "Desvio-padrão", "ic95": "IC 95%"}[s])
-    mostrar_obs = st.toggle("Mostrar observações individuais", value=True)
-    alfa_obs = st.slider("Transparência das observações", 0.1, 1.0, 0.45, 0.05)
-    fonte_pt = st.select_slider("Corpo do texto (pt)", [6, 6.5, 7, 7.5, 8, 9], value=7)
-    idioma = st.radio("Idioma das saídas", ["pt", "en"], horizontal=True,
-                      format_func=lambda s: {"pt": "Português", "en": "English"}[s])
+        ss.setdefault("w_com_ep", True)
+        com_ep = st.toggle("Tabelas com média ± erro-padrão", key="w_com_ep")
+        ss.perfil_auto = st.toggle("Gráfico em perfil para fatores de camada/profundidade", value=ss.get("perfil_auto", True))
+    st.markdown("### <span class='n'>03 /</span> Saídas", unsafe_allow_html=True)
+    idioma = st.radio("Idioma", ["pt", "en"], horizontal=True, format_func=lambda s: {"pt": "Português", "en": "English"}[s])
+    presets = list(tm.PRESETS)
+    novo_p = st.selectbox("Tema das figuras", presets, index=presets.index(ss.tema_preset),
+                          help="Ajuste fino de cada figura e painéis na aba Estúdio de figuras.")
+    if novo_p != ss.tema_preset:
+        ss.tema_preset = novo_p
+    st.markdown("### <span class='n'>04 /</span> Projeto", unsafe_allow_html=True)
+    st.file_uploader("Abrir projeto (.estatexp)", type=["estatexp"], key="w_projeto", on_change=abrir_projeto,
+                     help="Reabre dados, delineamento, opções, modelos escolhidos, exclusões e estilos das figuras. "
+                          "Salve o projeto na aba Downloads.")
+    if ss.get("_erro_projeto"):
+        st.error(ss.pop("_erro_projeto"))
     st.caption(f"Motor v{__version__} · resultados determinísticos")
 
-cfg = gr.ConfigGrafico(largura_mm=gr.LARGURAS[largura], estilo=estilo_g, erro=erro_g, mostrar_obs=mostrar_obs,
-                       alfa_obs=alfa_obs, fonte_pt=fonte_pt, idioma=idioma)
 opcoes_base = dict(alfa=alfa, metodo=metodo, transformacao=transf, comparar_quantitativos=comparar_q,
                    alfa_interacao=alfa_int, modelos_regressao=modelos or None)
 
-aba_dados, aba_res, aba_multi, aba_down, aba_guia = st.tabs(
-    ["Dados e modelo", "Resultados", "Correlações e PCA", "Downloads", "Guia"])
+ABAS = ["Dados e modelo", "Resultados", "Estúdio de figuras", "Multivariada", "Planejamento", "Downloads", "Guia"]
+aba_dados, aba_res, aba_est, aba_multi, aba_plan, aba_down, aba_guia = st.tabs(ABAS, key="aba", on_change="rerun")
+
+
+def K(nome):
+    """Chave dos widgets de mapeamento, renovada a cada novo conjunto de dados (o navegador guarda o valor
+    antigo dos widgets; trocar a chave garante que as sugestões da nova planilha sejam usadas)."""
+    return f"{nome}__d{ss.get('dados_v', 0)}"
+
+
+def limpar_mapeamento():
+    ss.dados_v = ss.get("dados_v", 0) + 1
+
+
+def ir_para_estudio(fig_id):
+    ss.estudio_fig = fig_id
+    ss.est_sel_fig = fig_id
+    ss.aba = "Estúdio de figuras"
+    ss.est_modo = "Figura"
 
 
 # ============================================================================
@@ -141,29 +281,6 @@ def ler_planilha(conteudo: bytes, nome: str, aba=None):
     return df, xl.sheet_names
 
 
-def fmt_tabela(df: pd.DataFrame, p_cols=("p",)):
-    out = df.copy()
-    for c in out.columns:
-        if c in p_cols:
-            out[c] = [("< 0,0001" if v < 1e-4 else f"{v:.4f}".replace(".", ",")) if isinstance(v, (float, np.floating))
-                      and np.isfinite(v) else "" for v in out[c]]
-        elif pd.api.types.is_numeric_dtype(out[c]) and out[c].dropna().apply(lambda v: float(v).is_integer()).all() \
-                and c in ("GL", "n", "#", "GL erro", "Linha na planilha"):
-            out[c] = [f"{int(v)}" if pd.notna(v) else "" for v in out[c]]
-        elif pd.api.types.is_numeric_dtype(out[c]):
-            def f(v):
-                if v is None or not np.isfinite(v):
-                    return ""
-                d = exportar._decimais(v)
-                return exportar._fmt_str(v, d, "pt")
-            out[c] = [f(v) for v in out[c]]
-    return out
-
-
-def anova_df(res):
-    return exportar._tabela_anova(res, "pt").reset_index()
-
-
 def chave_fatia(fa):
     return (fa.fator, tuple(sorted(fa.condicao.items())))
 
@@ -179,14 +296,14 @@ def spec_da_interface(df):
         if base == "DBC" or estrutura in ("subdividida", "subsubdividida", "faixas"):
             rot = "Coluna de blocos" if base == "DBC" else "Coluna de repetições"
             idx = colunas.index(sug["bloco"]) if sug["bloco"] in colunas else 0
-            bloco = st.selectbox(rot, colunas, index=idx, key="w_bloco")
+            bloco = st.selectbox(rot, colunas, index=idx, key=K("w_bloco"))
         if base == "DQL":
             linha = st.selectbox("Coluna de linhas", colunas,
-                                 index=colunas.index(sug["linha"]) if sug["linha"] in colunas else 0, key="w_lin")
+                                 index=colunas.index(sug["linha"]) if sug["linha"] in colunas else 0, key=K("w_lin"))
             coluna = st.selectbox("Coluna de colunas", colunas,
-                                  index=colunas.index(sug["coluna"]) if sug["coluna"] in colunas else 0, key="w_col")
+                                  index=colunas.index(sug["coluna"]) if sug["coluna"] in colunas else 0, key=K("w_col"))
         if estrutura == "fatorial_adicional":
-            trat = st.selectbox("Coluna com o nome de cada tratamento", colunas, key="w_trat",
+            trat = st.selectbox("Coluna com o nome de cada tratamento", colunas, key=K("w_trat"),
                                 index=colunas.index(sug["tratamento"]) if sug["tratamento"] in colunas else 0,
                                 help="Nos tratamentos adicionais, as colunas dos fatores devem estar vazias.")
     usados = {bloco, linha, coluna, trat}
@@ -194,14 +311,14 @@ def spec_da_interface(df):
     sug_f = [c for c in sug["fatores"] if c in cand]
     with c2:
         if estrutura == "simples":
-            f1 = st.selectbox("Fator (tratamentos)", cand, index=cand.index(sug_f[0]) if sug_f else 0, key="w_f1")
+            f1 = st.selectbox("Fator (tratamentos)", cand, index=cand.index(sug_f[0]) if sug_f else 0, key=K("w_f1"))
             escolha = [(f1, 1)]
         elif estrutura in ("fatorial", "fatorial_adicional"):
-            fs = st.multiselect("Fatores do fatorial (2 a 4)", cand, default=sug_f[:2], key="w_fat", max_selections=4)
+            fs = st.multiselect("Fatores do fatorial (2 a 4)", cand, default=sug_f[:2], key=K("w_fat"), max_selections=4)
             escolha = [(c, 1) for c in fs]
         elif estrutura == "faixas":
-            fa = st.selectbox("Fator nas faixas horizontais", cand, key="w_fa")
-            fb = st.selectbox("Fator nas faixas verticais", [c for c in cand if c != fa], key="w_fb")
+            fa = st.selectbox("Fator nas faixas horizontais", cand, key=K("w_fa"))
+            fb = st.selectbox("Fator nas faixas verticais", [c for c in cand if c != fa], key=K("w_fb"))
             escolha = [(fa, 1), (fb, 2)]
         else:
             niveis = 3 if estrutura == "subsubdividida" else 2
@@ -210,7 +327,7 @@ def spec_da_interface(df):
             restante = list(cand)
             for n in range(1, niveis + 1):
                 pad = [c for c in sug_f if c in restante][:1]
-                fs = st.multiselect(nomes[n], restante, default=pad, key=f"w_nivel{n}")
+                fs = st.multiselect(nomes[n], restante, default=pad, key=K(f"w_nivel{n}"))
                 escolha += [(c, n) for c in fs]
                 restante = [c for c in restante if c not in fs]
     if escolha:
@@ -223,437 +340,604 @@ def spec_da_interface(df):
             numerico = pd.to_numeric(valores.astype(str).str.replace(",", "."), errors="coerce").notna().all()
             n_niv = valores.nunique()
             sug_q = bool(numerico and n_niv >= 3 and not relatorio.parece_camada(col))
-            rot = k1.text_input(f"Rótulo de '{col}'", value=str(col), key=f"rot_{col}")
-            q = k2.toggle("Quantitativo (regressão)", value=sug_q, key=f"q_{col}", disabled=not numerico,
-                          help="Doses, épocas, idades… Habilita o ajuste de modelos de regressão.")
-            un = k3.text_input("Unidade (eixo x)", value="", key=f"un_{col}", placeholder="ex.: kg ha⁻¹") if q else ""
+            rot = k1.text_input(f"Rótulo de '{col}'", value=str(col), key=K(f"rot_{col}"))
+            q = k2.toggle("Quantitativo (regressão)", value=sug_q, key=K(f"q_{col}"), disabled=not numerico,
+                          help="Doses, épocas, idades, concentrações… Habilita o ajuste de modelos de regressão.")
+            un = k3.text_input("Unidade (eixo x)", value="", key=K(f"un_{col}"), placeholder="ex.: kg ha⁻¹") if q else ""
             fatores.append(Fator(col, rot, n, q, un))
     return Especificacao(base=base, estrutura=estrutura, fatores=fatores, bloco=bloco, linha=linha, coluna=coluna,
                          tratamento=trat), [c for c in colunas if c not in usados | {c for c, _ in escolha}]
 
 
+def filtrar_excluidas(d, chave):
+    exc = ss.excluir.get(chave)
+    return d[~(d.index + 2).isin(exc)] if exc else d
+
+
+def reanalisar(sel, transformacao=None, manter_transf=False):
+    ce = ss.config_exec
+    d = filtrar_excluidas(dict(ce["grupos"])[sel[0]], sel)
+    if manter_transf:
+        transformacao = ss.transf_var.get(sel[1], opcoes_base["transformacao"])
+    try:
+        ss.resultados[sel] = analisar(d, ce["spec"], sel[1], Opcoes(**{**opcoes_base, "transformacao": transformacao}))
+    except Exception as e:
+        ss.resultados[sel] = e
+    nova_versao()
+
+
+def executar(df, spec, respostas, separar, op_base, barra=None):
+    """Roda a análise de todas as variáveis (e grupos), aplicando transformações e exclusões guardadas."""
+    grupos = [(None, df)]
+    if separar and separar != "(nenhuma)":
+        grupos = [(f"{separar} = {g}", d) for g, d in df.groupby(separar, sort=False)]
+    resultados = {}
+    tot = len(grupos) * len(respostas)
+    i = 0
+    for nome_g, d in grupos:
+        for v in respostas:
+            t_ = ss.transf_var.get(v, op_base["transformacao"])
+            op = Opcoes(**{**op_base, "transformacao": t_})
+            try:
+                resultados[(nome_g, v)] = analisar(filtrar_excluidas(d, (nome_g, v)), spec, v, op)
+            except ErroDelineamento as e:
+                resultados[(nome_g, v)] = e
+            except Exception as e:  # erro inesperado: registra para diagnóstico
+                e.detalhe = traceback.format_exc()
+                resultados[(nome_g, v)] = e
+            i += 1
+            if barra is not None:
+                barra.progress(i / tot, text=f"Analisando {v}…")
+    ss.resultados = resultados
+    ss.config_exec = dict(spec=spec, opcoes=Opcoes(**op_base), separar=separar, grupos=grupos, respostas=respostas)
+    ss.tabelas_extra = {k: v for k, v in ss.tabelas_extra.items()
+                        if k in ("agrupamento", "trilha")}   # análises ligadas aos resultados são refeitas
+    nova_versao()
+    return resultados
+
+
+# Projeto aberto pela barra lateral: executa com a configuração salva
+if ss.get("_executar_projeto"):
+    cfg = ss.pop("_executar_projeto")
+    try:
+        executar(ss.df, cfg["spec"], cfg["respostas"], cfg.get("separar"),
+                 {**opcoes_base, **{k: v for k, v in vars(cfg["opcoes"]).items() if k in opcoes_base}})
+        st.toast("Projeto aberto e análises refeitas.")
+    except Exception as e:
+        st.error(f"Projeto aberto, mas a análise falhou: {e}")
+
+
 # ============================================================================
 # Aba: Dados e modelo
 # ============================================================================
-with aba_dados:
-    tpl_bytes, tpl_df, tpl_pap = templates.gerar_template(base, estrutura)
-    with st.expander("Como organizar a planilha — modelo para este delineamento", expanded=ss.df is None):
-        st.markdown(f"**{BASES[base]} — {ESTRUTURAS[estrutura].lower()}.** Formato longo: **uma linha por unidade "
-                    "experimental** (parcela, vaso ou subparcela), uma coluna para cada fator, uma para bloco/repetição "
-                    "e uma para cada variável-resposta.")
-        st.html(esquema_html(tpl_df, tpl_pap))
-        gerais, esp = templates.instrucoes(base, estrutura)
-        cA, cB = st.columns(2)
-        cA.markdown("**Regras gerais**\n\n" + "\n".join(f"- {g}" for g in gerais[:5]))
-        cB.markdown("**Neste delineamento**\n\n" + "\n".join(f"- {g}" for g in esp + gerais[5:]))
-        b1, b2, _ = st.columns([2, 2, 4])
-        b1.download_button("Baixar modelo em Excel", tpl_bytes, file_name=f"modelo_{base}_{estrutura}.xlsx",
-                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
-        if b2.button("Carregar este exemplo"):
-            df_ex, spec_ex, resp_ex = exemplo_para(base, estrutura)
-            ss.df, ss.nome_arquivo = df_ex, f"exemplo_{base}_{estrutura}.xlsx"
-            ss.resultados = {}
-            st.rerun()
+if aba_dados.open:
+    with aba_dados:
+        tpl_bytes, tpl_df, tpl_pap = templates.gerar_template(base, estrutura)
+        with st.expander("Como organizar a planilha — modelo para este delineamento", expanded=ss.df is None):
+            st.markdown(f"**{BASES[base]} — {ESTRUTURAS[estrutura].lower()}.** Formato longo: **uma linha por unidade "
+                        "experimental** (parcela, vaso ou subparcela), uma coluna para cada fator, uma para "
+                        "bloco/repetição e uma para cada variável-resposta.")
+            st.html(esquema_html(tpl_df, tpl_pap))
+            gerais, esp = templates.instrucoes(base, estrutura)
+            cA, cB = st.columns(2)
+            cA.markdown("**Regras gerais**\n\n" + "\n".join(f"- {g}" for g in gerais[:5]))
+            cB.markdown("**Neste delineamento**\n\n" + "\n".join(f"- {g}" for g in esp + gerais[5:]))
+            b1, b2, _ = st.columns([3, 2, 3])
+            b1.download_button("Baixar modelo em Excel", tpl_bytes, file_name=f"modelo_{base}_{estrutura}.xlsx",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
+            if b2.button("Carregar este exemplo"):
+                df_ex, spec_ex, resp_ex = exemplo_para(base, estrutura)
+                ss.df, ss.nome_arquivo = df_ex, f"exemplo_{base}_{estrutura}.xlsx"
+                ss.resultados, ss.excluir, ss.tabelas_extra, ss.extras = {}, {}, {}, {}
+                limpar_mapeamento()
+                nova_versao()
+                st.rerun()
 
-    up = st.file_uploader("Planilha de dados (.xlsx, .xls ou .csv)", type=["xlsx", "xls", "csv", "txt"])
-    if up is not None:
-        conteudo = up.getvalue()
-        _, abas = ler_planilha(conteudo, up.name)
-        aba = st.selectbox("Aba", abas) if abas and len(abas) > 1 else None
-        df_novo, _ = ler_planilha(conteudo, up.name, aba)
-        if ss.nome_arquivo != f"{up.name}:{aba}":
-            ss.df, ss.nome_arquivo, ss.resultados = df_novo, f"{up.name}:{aba}", {}
-    df = ss.df
-    if df is None:
-        st.info("Envie sua planilha ou carregue o exemplo acima para começar.")
-    else:
-        st.caption(f"{str(ss.nome_arquivo).replace(':None', '')} — {len(df)} linhas × {df.shape[1]} colunas")
-        st.dataframe(df.head(200), height=230, hide_index=True)
-        st.markdown("#### Mapeamento das colunas")
-        try:
-            spec, livres = spec_da_interface(df)
-        except Exception as e:
-            st.error(f"Não foi possível montar o delineamento: {e}")
-            spec, livres = None, []
-        sug = sugerir_colunas(df)
-        num_livres = [c for c in livres if pd.to_numeric(df[c], errors="coerce").notna().mean() > 0.5]
-        padrao_resp = [c for c in sug["respostas"] if c in num_livres] or num_livres[:1]
-        respostas = st.multiselect("Variáveis-resposta", num_livres, default=padrao_resp, key="w_resp")
-        cS1, cS2 = st.columns([1, 1])
-        sep_opts = ["(nenhuma)"] + [c for c in livres if c not in respostas and df[c].nunique() <= 20]
-        separar = cS1.selectbox("Analisar separadamente por", sep_opts,
-                                help="Ex.: rodar a análise para cada camada, local ou safra separadamente.")
-        executar = cS2.button("Executar análise", type="primary", width="stretch",
-                              disabled=spec is None or not respostas)
-        if executar and spec is not None:
+        up = st.file_uploader("Planilha de dados (.xlsx, .xls ou .csv)", type=["xlsx", "xls", "csv", "txt"])
+        if up is not None:
+            conteudo = up.getvalue()
+            _, abas = ler_planilha(conteudo, up.name)
+            aba = st.selectbox("Aba", abas) if abas and len(abas) > 1 else None
+            df_novo, _ = ler_planilha(conteudo, up.name, aba)
+            marca = f"{up.file_id}:{aba}"
+            if ss.get("_upload_marca") != marca:
+                ss._upload_marca = marca
+                ss.df, ss.nome_arquivo, ss.resultados = df_novo, f"{up.name}:{aba}", {}
+                ss.excluir, ss.tabelas_extra, ss.extras = {}, {}, {}
+                limpar_mapeamento()
+                nova_versao()
+        df = ss.df
+        if df is None:
+            st.info("Envie sua planilha ou carregue o exemplo acima para começar.")
+        else:
+            st.caption(f"{str(ss.nome_arquivo).replace(':None', '')} — {len(df)} linhas × {df.shape[1]} colunas")
+            st.dataframe(df.head(200), height=230, hide_index=True)
+            st.markdown("#### Mapeamento das colunas")
             try:
-                spec.validar(df)
-            except ErroDelineamento as e:
-                st.error(str(e))
-                st.stop()
-            grupos = [(None, df)]
-            if separar != "(nenhuma)":
-                grupos = [(f"{separar} = {g}", d.reset_index(drop=True)) for g, d in df.groupby(separar, sort=False)]
-            resultados = {}
-            barra = st.progress(0.0, text="Analisando…")
-            tot = len(grupos) * len(respostas)
-            i = 0
-            for nome_g, d in grupos:
-                for v in respostas:
-                    t_ = ss.transf_var.get(v, transf)
-                    op = Opcoes(**{**opcoes_base, "transformacao": t_})
-                    try:
-                        resultados[(nome_g, v)] = analisar(d, spec, v, op)
-                    except ErroDelineamento as e:
-                        resultados[(nome_g, v)] = e
-                    except Exception as e:  # erro inesperado: registra para diagnóstico
-                        e.detalhe = traceback.format_exc()
-                        resultados[(nome_g, v)] = e
-                    i += 1
-                    barra.progress(i / tot, text=f"Analisando {v}…")
-            barra.empty()
-            ss.resultados = resultados
-            ss.config_exec = dict(spec=spec, opcoes=Opcoes(**opcoes_base), separar=separar, grupos=grupos,
-                                  respostas=respostas)
-            ss.cache_figs = {}
-            ss.extras = {}
-            n_ok = sum(not isinstance(r, Exception) for r in resultados.values())
-            st.success(f"{n_ok} de {len(resultados)} análise(s) concluída(s). Veja a aba Resultados.")
-            for (g, v), r in resultados.items():
-                if isinstance(r, Exception):
-                    st.error(f"{v}{' — ' + g if g else ''}: {r}")
+                spec, livres = spec_da_interface(df)
+            except Exception as e:
+                st.error(f"Não foi possível montar o delineamento: {e}")
+                spec, livres = None, []
+            sug = sugerir_colunas(df)
+            num_livres = [c for c in livres if pd.to_numeric(df[c], errors="coerce").notna().mean() > 0.5]
+            padrao_resp = [c for c in sug["respostas"] if c in num_livres] or num_livres[:1]
+            respostas = st.multiselect("Variáveis-resposta", num_livres, default=padrao_resp, key=K("w_resp"))
+            cS1, cS2 = st.columns([1, 1])
+            sep_opts = ["(nenhuma)"] + [c for c in livres if c not in respostas and df[c].nunique() <= 20]
+            if ss.get(K("w_separar")) not in sep_opts:
+                ss[K("w_separar")] = "(nenhuma)"
+            separar = cS1.selectbox("Analisar separadamente por", sep_opts, key=K("w_separar"),
+                                    help="Ex.: rodar a análise para cada camada, local ou safra separadamente. "
+                                         "Com locais ou safras, a análise conjunta fica disponível em Resultados.")
+            rodar = cS2.button("▶ Executar análise", type="primary", width="stretch",
+                               disabled=spec is None or not respostas)
+            if rodar and spec is not None:
+                try:
+                    spec.validar(df)
+                except ErroDelineamento as e:
+                    st.error(str(e))
+                    st.stop()
+                barra = st.progress(0.0, text="Analisando…")
+                resultados = executar(df, spec, respostas, separar, opcoes_base, barra)
+                barra.empty()
+                n_ok = sum(not isinstance(r, Exception) for r in resultados.values())
+                st.success(f"{n_ok} de {len(resultados)} análise(s) concluída(s). Veja a aba Resultados.")
+                for (g, v), r in resultados.items():
+                    if isinstance(r, Exception):
+                        st.error(f"{v}{' — ' + g if g else ''}: {r}")
 
 
 # ============================================================================
 # Aba: Resultados
 # ============================================================================
-def figuras_cache(chave, res, rotulo_y, perfil, modelos_esc):
-    k = (chave, tuple(sorted(cfg.__dict__.items(), key=lambda x: x[0])).__str__(), rotulo_y, perfil,
-         tuple(sorted(modelos_esc.items())))
-    if len(ss.cache_figs) > 40:
-        ss.cache_figs = {}
-    if k not in ss.cache_figs:
-        # aplica escolhas manuais de modelo
-        for fa in res.fatias:
-            ce = modelos_esc.get(chave_fatia(fa))
-            if fa.regressao and ce:
-                alvo = [a for a in fa.regressao.ajustes if a.codigo == ce]
-                if alvo:
-                    fa.regressao.melhor = alvo[0]
-        figs = relatorio.figuras_para(res, cfg, rotulo_y, perfil)
-        saida = []
-        for nome, titulo, fig in figs:
-            saida.append((nome, titulo, gr.png_preview(fig, 200), gr.exportar(fig, cfg, ("png", "svg", "pdf", "tiff"))))
-            plt.close(fig)
-        ss.cache_figs[k] = saida
-    return ss.cache_figs[k]
+def mostrar_figuras(itens, chave):
+    for k, it in enumerate(itens):
+        st.html(f"<div class='rotulo-mono'><span>FIG. {k + 1:02d} /</span> {it.titulo.upper()}</div>")
+        ci, cb = st.columns([3, 1])
+        try:
+            ci.image(previa(it, idioma=idioma), width="content")
+        except Exception as e:
+            ci.error(f"Erro ao desenhar: {e}")
+        with cb:
+            st.button("Editar no Estúdio", key=f"ed_{chave}_{it.id}", on_click=ir_para_estudio, args=(it.id,),
+                      type="primary", width="stretch")
+            botoes_figura(it, idioma, chave, horizontal=False)
 
 
-def fig_cache(chave, construtor):
-    """Gera (uma vez por configuração) a prévia e os arquivos de uma figura avulsa."""
-    k = ("avulsa", chave, str(sorted(cfg.__dict__.items(), key=lambda x: x[0])))
-    if k not in ss.cache_figs:
-        fig = construtor()
-        ss.cache_figs[k] = (gr.png_preview(fig, 180), gr.exportar(fig, cfg, ("png", "svg", "pdf", "tiff")))
-        plt.close(fig)
-    return ss.cache_figs[k]
-
-
-def botoes_download_fig(arqs, nome, chave, vertical=True):
-    mimes = {"png": "image/png", "svg": "image/svg+xml", "pdf": "application/pdf", "tiff": "image/tiff"}
-    rot = {"png": "PNG 600 dpi", "svg": "SVG editável", "pdf": "PDF vetorial", "tiff": "TIFF 600 dpi"}
-    alvos = [st.container() for _ in arqs] if vertical else st.columns(4)
-    for c, (ext, dados) in zip(alvos, arqs.items()):
-        c.download_button(rot[ext], dados, file_name=f"{nome}.{ext}", mime=mimes[ext], key=f"dl_{chave}_{ext}",
-                          width="stretch")
-
-
-with aba_res:
-    if not ss.resultados:
-        st.info("Execute a análise na aba Dados e modelo.")
-    else:
-        chaves = list(ss.resultados)
-        rotulo_ch = lambda k: k[1] + (f"  ·  {k[0]}" if k[0] else "")
-        i_sel = st.selectbox("Variável", list(range(len(chaves))), format_func=lambda i: rotulo_ch(chaves[i]))
-        sel = chaves[i_sel]
-        res = ss.resultados[sel]
-        if isinstance(res, Exception):
-            st.error(str(res))
-            if hasattr(res, "detalhe"):
-                with st.expander("Detalhes técnicos"):
-                    st.code(res.detalhe)
+if aba_res.open:
+    with aba_res:
+        if not ss.resultados:
+            st.info("Execute a análise na aba Dados e modelo.")
         else:
-            spec = res.spec
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Média geral", exportar._fmt_str(res.media_geral, exportar._decimais(res.media_geral), "pt"))
-            cvs = list(res.cv.items())
-            m2.metric(cvs[0][0].replace(" [escala transformada]", ""), exportar._fmt_str(cvs[0][1], 2, "pt"))
-            if len(cvs) > 1:
-                m3.metric(cvs[1][0].replace(" [escala transformada]", ""), exportar._fmt_str(cvs[1][1], 2, "pt"))
+            chaves = list(ss.resultados)
+            rotulo_ch = lambda k: k[1] + (f"  ·  {k[0]}" if k[0] else "")
+            i_sel = st.selectbox("Variável", list(range(len(chaves))), format_func=lambda i: rotulo_ch(chaves[i]))
+            sel = chaves[i_sel]
+            res = ss.resultados[sel]
+            nome_base = relatorio._slug(sel[1]) + (f"_{relatorio._slug(sel[0])}" if sel[0] else "")
+            if isinstance(res, Exception):
+                st.error(str(res))
+                if hasattr(res, "detalhe"):
+                    with st.expander("Detalhes técnicos"):
+                        st.code(res.detalhe)
             else:
-                m3.metric("R² do modelo", exportar._fmt_str(res.r2, 3, "pt"))
-            pr = res.pressupostos
-            estado = ("atendidos" if (pr.ok_normalidade is not False and pr.ok_homogeneidade is not False)
-                      else "violados")
-            m4.metric("Pressupostos", estado)
-            for a in res.avisos:
-                st.warning(a)
-            if res.transformacao:
-                st.info(f"Transformação aplicada: {rotulo_transformacao(res.transformacao)}")
+                spec = res.spec
+                m1, m2, m3, m4 = st.columns(4)
+                un_y = ss.rotulos_y.get(sel[1], "")
+                with m1:
+                    ua.leitura("Média geral", exportar._fmt_str(res.media_geral, exportar._decimais(res.media_geral), "pt"),
+                               sel[1])
+                cvs = list(res.cv.items())
+                with m2:
+                    ua.leitura(cvs[0][0].replace(" [escala transformada]", "").replace(" (%)", ""),
+                               exportar._fmt_str(cvs[0][1], 1, "pt") + "%",
+                               "escala transformada" if res.transformacao else "coef. de variação")
+                with m3:
+                    if len(cvs) > 1:
+                        ua.leitura(cvs[1][0].replace(" [escala transformada]", "").replace(" (%)", ""),
+                                   exportar._fmt_str(cvs[1][1], 1, "pt") + "%", "coef. de variação")
+                    else:
+                        ua.leitura("R² do modelo", exportar._fmt_str(res.r2, 3, "pt"), "ajuste da ANOVA")
+                pr = res.pressupostos
+                testes_ok = [t.ok for t in pr.testes if t.ok is not None]
+                n_ok = sum(bool(t) for t in testes_ok)
+                with m4:
+                    tudo = n_ok == len(testes_ok)
+                    st.html(f"<div class='leitura {'ok' if tudo else 'alerta'}'><div class='leitura-rot'>Pressupostos"
+                            f"</div><div class='leitura-val'>{n_ok}/{len(testes_ok)}</div><div class='leitura-sub'>"
+                            f"{'● atendidos' if tudo else '● ver aba Pressupostos'}</div></div>")
+                if ss.excluir.get(sel):
+                    st.info(f"Análise sem as linhas {', '.join(map(str, sorted(ss.excluir[sel])))} da planilha "
+                            "(exclusão feita na aba Pressupostos).")
+                if getattr(res.dados, "incompleto", False):
+                    st.info("Parcelas faltantes em parcelas subdivididas: análise por modelo misto (REML), com testes F "
+                            "de Wald e GL por contenção. Nas linhas de erro da ANOVA aparecem os componentes de "
+                            "variância de cada estrato, no lugar do QM.")
+                for a in res.avisos:
+                    st.warning(a)
+                if res.transformacao:
+                    st.info(f"Transformação aplicada: {rotulo_transformacao(res.transformacao)}")
 
-            t_anova, t_med, t_reg, t_pres, t_txt = st.tabs(["ANOVA", "Médias e gráficos", "Regressão", "Pressupostos", "Texto"])
-            with t_anova:
-                st.dataframe(fmt_tabela(anova_df(res), p_cols=("p",)), hide_index=True, width="stretch")
-                st.caption("; ".join(f"{k} = {exportar._fmt_str(v, 2, 'pt')}" for k, v in res.cv.items())
-                           + f" · R² = {exportar._fmt_str(res.r2, 3, 'pt')} · ns: p ≥ {str(alfa).replace('.', ',')}; * p < 0,05; ** p < 0,01; *** p < 0,001")
-                if res.desdobramento:
-                    st.markdown("**Desdobramento da interação**")
-                    d = pd.DataFrame(res.desdobramento)
-                    d[" "] = [textos.estrela(p) for p in d["p"]]
-                    st.dataframe(fmt_tabela(d, ("p",)), hide_index=True, width="stretch")
-                    if spec.multiestrato:
-                        st.caption("Desdobramentos que combinam estratos usam erro combinado com GL de Satterthwaite.")
-                for fa in res.fatias:
-                    if fa.polinomial:
-                        cond = ", ".join(f"{spec.fatores[k].rotulo} = {v}" for k, v in fa.condicao.items())
-                        st.markdown(f"**Decomposição polinomial — {spec.fatores[fa.fator].rotulo}**" + (f" ({cond})" if cond else ""))
-                        d = pd.DataFrame(fa.polinomial)
+                ce = ss.config_exec or {}
+                sep_col = ce.get("separar") if ce.get("separar") not in (None, "(nenhuma)") else None
+                nomes_sub = ["ANOVA", "Médias e gráficos", "Regressão", "Pressupostos", "Contrastes", "Texto"]
+                if sep_col:
+                    nomes_sub.insert(5, "Análise conjunta")
+                subs = st.tabs(nomes_sub)
+                t_anova, t_med, t_reg, t_pres, t_ctr = subs[:5]
+                t_txt = subs[-1]
+                t_cj = subs[5] if sep_col else None
+                nota_sig = f"ns: p ≥ {str(alfa).replace('.', ',')}; * p < 0,05; ** p < 0,01; *** p < 0,001"
+                with t_anova:
+                    titulo_secao(1, "Análise de variância")
+                    ta = exportar._tabela_anova(res, "pt").reset_index()
+                    nota_cv = "; ".join(f"{k} = {exportar._fmt_str(v, 2, 'pt')}" for k, v in res.cv.items()) \
+                              + f"; R² = {exportar._fmt_str(res.r2, 3, 'pt')}. {nota_sig}"
+                    tabela_ui(ta, f"anova_{nome_base}", f"Análise de variância — {sel[1]}", nota_cv, f"an_{i_sel}")
+                    st.caption(nota_cv + ". η²p e ω²p: tamanho de efeito parcial (proporção da variação explicada pelo "
+                               "efeito, descontado o erro do seu estrato; ω²p é menos enviesado).")
+                    if res.desdobramento:
+                        st.markdown("**Desdobramento da interação**")
+                        d = pd.DataFrame(res.desdobramento)
                         d[" "] = [textos.estrela(p) for p in d["p"]]
-                        st.dataframe(fmt_tabela(d, ("p",)), hide_index=True, width="stretch")
+                        tabela_ui(d, f"desdobramento_{nome_base}", f"Desdobramento da interação — {sel[1]}", nota_sig,
+                                  f"de_{i_sel}")
+                        if spec.multiestrato:
+                            st.caption("Desdobramentos que combinam estratos usam erro combinado com GL de Satterthwaite.")
+                    for j, fa in enumerate(res.fatias):
+                        if fa.polinomial:
+                            cond = ", ".join(f"{spec.fatores[k].rotulo} = {v}" for k, v in fa.condicao.items())
+                            tit = f"Decomposição polinomial — {spec.fatores[fa.fator].rotulo}" + (f" ({cond})" if cond else "")
+                            st.markdown(f"**{tit}**")
+                            d = pd.DataFrame(fa.polinomial)
+                            d[" "] = [textos.estrela(p) for p in d["p"]]
+                            tabela_ui(d, f"polinomial_{nome_base}_{j}", tit, nota_sig, f"po_{i_sel}_{j}")
 
-            with t_med:
-                cfg_col, _ = st.columns([2, 3])
-                rot_padrao = ss.rotulos_y.get(sel[1], sel[1])
-                ss.rotulos_y[sel[1]] = cfg_col.text_input("Rótulo do eixo Y", value=rot_padrao, key=f"roty_{sel}",
-                                                          help="Use sobrescritos Unicode para unidades: ⁻¹ ⁻² ⁻³ ² ³")
-                camadas = [i for i, f in enumerate(spec.fatores) if relatorio.parece_camada(f.coluna) or relatorio.parece_camada(f.rotulo)]
-                perfil = None
-                if camadas:
-                    if cfg_col.toggle(f"Gráfico em perfil para '{spec.fatores[camadas[0]].rotulo}'", value=True, key=f"perf_{sel}"):
-                        perfil = camadas[0]
-                modelos_esc = ss.modelo_escolhido.get(sel, {})
-                figs = figuras_cache(sel, res, ss.rotulos_y[sel[1]], perfil, modelos_esc)
-                # tabelas de médias
-                for fa in res.fatias:
-                    cond = ", ".join(f"{spec.fatores[k].rotulo} = {v}" for k, v in fa.condicao.items())
-                    sig = fa.p is not None and fa.p < res.alfa
-                    tit = f"{spec.fatores[fa.fator].rotulo}" + (f" — {cond}" if cond else "")
-                    with st.expander(f"Médias: {tit}  ·  F = {exportar._fmt_str(fa.f, 2, 'pt')}; "
-                                     f"{textos._p(fa.p)} {'' if sig else '(ns)'}",
-                                     expanded=False):
-                        d = pd.DataFrame({"Nível": fa.niveis, "Média": fa.medias_orig, "EP": fa.ep_dados, "n": fa.n})
-                        if fa.comparacao is not None:
-                            d["Letras" if fa.comparacao.metodo != "dunnett" else "Dunnett"] = (
-                                fa.comparacao.letras if sig else [""] * len(fa.niveis))
-                        st.dataframe(fmt_tabela(d), hide_index=True, width="stretch")
-                        if fa.comparacao is not None and fa.comparacao.dms:
-                            st.caption(f"DMS = {exportar._fmt_str(fa.comparacao.dms, exportar._decimais(fa.comparacao.dms), 'pt')}"
-                                       f"; GL do erro = {exportar._fmt_str(fa.gl, 1, 'pt')}")
-                for td in res.tabelas_duplas:
-                    st.markdown(f"**Interação {td['linhas']} × {td['colunas']}** — minúsculas comparam "
-                                f"{td['linhas']} na coluna; maiúsculas comparam {td['colunas']} na linha")
-                    med, ep, let = td["medias"], td["ep"], td["letras"]
-                    dec = exportar._decimais(np.nanmean(np.abs(med.to_numpy(float))))
-                    tab = pd.DataFrame({b: [exportar._celula_media(med.loc[a, b], ep.loc[a, b],
-                                                                   let.loc[a, b].replace(" ", ""), "pt", True, dec)
-                                            for a in med.index] for b in med.columns}, index=med.index)
-                    st.dataframe(tab, width="stretch")
-                st.markdown("#### Gráficos")
-                for i, (nome, titulo, png, arqs) in enumerate(figs):
-                    st.markdown(f"**{titulo}**")
-                    ci, cb = st.columns([3, 1])
-                    ci.image(png, width="stretch" if cfg.largura_mm > 120 else "content")
-                    with cb:
-                        st.caption("Baixar")
-                        botoes_download_fig(arqs, nome, f"{sel}_{i}")
+                with t_med:
+                    cfg_col, _ = st.columns([2, 3])
+                    rot_atual = ss.rotulos_y.get(sel[1], sel[1])
+                    novo_rot = cfg_col.text_input("Rótulo do eixo Y (todas as figuras desta variável)", value=rot_atual,
+                                                  key=f"roty_{sel}", help="Use sobrescritos Unicode: ⁻¹ ⁻² ⁻³ ² ³ ⁺")
+                    if novo_rot != rot_atual:
+                        ss.rotulos_y[sel[1]] = novo_rot
+                    nota_letras = (f"Médias seguidas pela mesma letra não diferem pelo teste {METODOS[metodo]} "
+                                   f"(p < {str(alfa).replace('.', ',')}).")
+                    for j, fa in enumerate(res.fatias):
+                        cond = ", ".join(f"{spec.fatores[k].rotulo} = {v}" for k, v in fa.condicao.items())
+                        sig = fa.p is not None and fa.p < res.alfa
+                        tit = f"{spec.fatores[fa.fator].rotulo}" + (f" — {cond}" if cond else "")
+                        with st.expander(f"Médias: {tit}  ·  F = {exportar._fmt_str(fa.f, 2, 'pt')}; "
+                                         f"{textos._p(fa.p)} {'' if sig else '(ns)'}", expanded=False):
+                            d = pd.DataFrame({spec.fatores[fa.fator].rotulo: fa.niveis, "Média": fa.medias_orig,
+                                              "EP": fa.ep_dados, "n": fa.n})
+                            if getattr(fa, "ic_inf", None) is not None:
+                                d["IC 95% inf."], d["IC 95% sup."] = fa.ic_inf, fa.ic_sup
+                            if fa.comparacao is not None:
+                                d["Letras" if fa.comparacao.metodo != "dunnett" else "Dunnett"] = (
+                                    fa.comparacao.letras if sig else [""] * len(fa.niveis))
+                            extra = ""
+                            if fa.comparacao is not None and fa.comparacao.dms:
+                                extra = (f" DMS = {exportar._fmt_str(fa.comparacao.dms, exportar._decimais(fa.comparacao.dms), 'pt')};"
+                                         f" GL do erro = {exportar._fmt_str(fa.gl, 1, 'pt')}.")
+                            tabela_ui(d, f"medias_{nome_base}_{j}", f"Médias de {sel[1]} — {tit}",
+                                      (nota_letras if sig else "Efeito não significativo pelo teste F.") + extra,
+                                      f"me_{i_sel}_{j}")
+                            if extra:
+                                st.caption(extra.strip())
+                            if fa.comparacao is not None and fa.comparacao.pares and \
+                                    st.toggle("Diferenças par a par com IC", key=f"pp_{sel}_{j}"):
+                                pp = pd.DataFrame([{"Nível 1": q["g1"], "Nível 2": q["g2"], "Diferença": q["dif"],
+                                                    "EP": q.get("ep_dif"), "IC inf.": q.get("ic_inf"),
+                                                    "IC sup.": q.get("ic_sup"), "p": q.get("p"),
+                                                    "Significativa": "sim" if q.get("sig") else "não"}
+                                                   for q in fa.comparacao.pares])
+                                if pp["p"].isna().all():
+                                    pp = pp.drop(columns="p")
+                                simult = fa.comparacao.metodo in ("tukey", "bonferroni", "dunnett")
+                                tabela_ui(pp, f"pares_{nome_base}_{j}", f"Diferenças entre médias — {tit}",
+                                          ("Intervalos simultâneos" if simult else "Intervalos individuais")
+                                          + f" de {int(round(100 * (1 - res.alfa)))}% ({METODOS[fa.comparacao.metodo]}).",
+                                          f"pp_{i_sel}_{j}")
+                    for j, td in enumerate(res.tabelas_duplas):
+                        st.markdown(f"**Interação {td['linhas']} × {td['colunas']}** — minúsculas comparam "
+                                    f"{td['linhas']} na coluna; maiúsculas comparam {td['colunas']} na linha")
+                        med, ep, let = td["medias"], td["ep"], td["letras"]
+                        dec = exportar._decimais(np.nanmean(np.abs(med.to_numpy(float))))
+                        tab = pd.DataFrame({b: [exportar._celula_media(med.loc[a, b], ep.loc[a, b],
+                                                                       let.loc[a, b].replace(" ", ""), "pt", com_ep, dec)
+                                                for a in med.index] for b in med.columns}, index=med.index)
+                        tab.index.name = f"{td['linhas']} \\ {td['colunas']}"
+                        tabela_ui(tab.reset_index(), f"interacao_{nome_base}_{j}",
+                                  f"{sel[1]}: interação {td['linhas']} × {td['colunas']}",
+                                  "Médias seguidas pela mesma letra minúscula na coluna e maiúscula na linha não diferem "
+                                  f"pelo teste {METODOS[metodo]} (p < {str(alfa).replace('.', ',')}).", f"in_{i_sel}_{j}")
+                    titulo_secao(2, "Gráficos")
+                    st.caption("Tema atual: " + ss.tema_preset + (" + ajustes globais" if ss.tema_global else "")
+                               + ". Clique em “Editar no Estúdio” para personalizar cada figura.")
+                    cat = catalogo(idioma)
+                    itens = [it for it in cat.values() if it.variavel == sel[1] and it.grupo == sel[0]
+                             and it.spec.tipo != "diagnostico"]
+                    mostrar_figuras(itens, f"res_{i_sel}")
 
-            with t_reg:
-                tem = [fa for fa in res.fatias if fa.regressao]
-                if not tem:
-                    st.info("Nenhum fator quantitativo com 3 ou mais níveis. Marque o fator como quantitativo na aba Dados.")
-                for fa in tem:
-                    cond = ", ".join(f"{spec.fatores[k].rotulo} = {v}" for k, v in fa.condicao.items())
-                    st.markdown(f"**{spec.fatores[fa.fator].rotulo}**" + (f" — {cond}" if cond else ""))
-                    if fa.p is not None and fa.p >= res.alfa:
-                        st.caption("Efeito não significativo pelo teste F: a resposta é representada pela média; "
-                                   "os ajustes são apenas descritivos.")
-                    linhas = []
-                    for a in fa.regressao.ajustes:
-                        linhas.append({"#": a.rank, "Modelo": a.nome, "Equação": a.equacao("pt"), "R²": a.r2,
-                                       "AICc": a.aicc, "ΔAICc": a.delta_aicc, "Peso": a.peso,
-                                       "p (falta de ajuste)": a.p_falta, "Adequado": "sim" if a.adequado else "não",
-                                       "Observação": a.motivo})
-                    d = pd.DataFrame(linhas)
-                    st.dataframe(fmt_tabela(d, ("p (falta de ajuste)",)), hide_index=True, width="stretch")
-                    opcoes_m = [a.codigo for a in fa.regressao.ajustes if a.convergiu]
-                    atual = ss.modelo_escolhido.get(sel, {}).get(chave_fatia(fa))
-                    padrao = fa.regressao.melhor.codigo if fa.regressao.melhor else (opcoes_m[0] if opcoes_m else None)
-                    if opcoes_m:
-                        esc = st.selectbox("Modelo usado no gráfico e no texto", opcoes_m,
-                                           index=opcoes_m.index(atual or padrao) if (atual or padrao) in opcoes_m else 0,
-                                           format_func=lambda c: CATALOGO[c].nome, key=f"mod_{sel}_{chave_fatia(fa)}")
-                        if esc != (atual or padrao):
-                            ss.modelo_escolhido.setdefault(sel, {})[chave_fatia(fa)] = esc
+                with t_reg:
+                    tem = [fa for fa in res.fatias if fa.regressao]
+                    if not tem:
+                        st.info("Nenhum fator quantitativo com 3 ou mais níveis. Marque o fator como quantitativo na aba Dados.")
+                    for j, fa in enumerate(tem):
+                        cond = ", ".join(f"{spec.fatores[k].rotulo} = {v}" for k, v in fa.condicao.items())
+                        st.markdown(f"**{spec.fatores[fa.fator].rotulo}**" + (f" — {cond}" if cond else ""))
+                        if fa.p is not None and fa.p >= res.alfa:
+                            st.caption("Efeito não significativo pelo teste F: a resposta é representada pela média; "
+                                       "os ajustes são apenas descritivos.")
+                        linhas = []
+                        for a in fa.regressao.ajustes:
+                            linhas.append({"Posição": a.rank, "Modelo": a.nome, "Equação": a.equacao("pt"), "R²": a.r2,
+                                           "AICc": a.aicc, "ΔAICc": a.delta_aicc, "Peso": a.peso,
+                                           "Falta de ajuste": a.falta_ajuste("pt", res.alfa),
+                                           "Adequado": "sim" if a.adequado else "não", "Observação": a.motivo})
+                        d = pd.DataFrame(linhas)
+                        tabela_ui(d, f"regressao_{nome_base}_{j}", f"Modelos ajustados — {sel[1]}",
+                                  "Falta de ajuste não detectada (p alto) indica que o modelo descreve bem as médias. "
+                                  "Modelos ordenados por adequação e AICc.", f"rg_{i_sel}_{j}",
+                                  column_config={"Falta de ajuste": st.column_config.TextColumn(
+                                      help="Teste F de falta de ajuste: compara o desvio das médias em relação à curva "
+                                           "com o erro experimental. 'Não detectada ✓' (p alto) = bom ajuste.")})
+                        opcoes_m = [a.codigo for a in fa.regressao.ajustes if a.convergiu]
+                        atual = ss.modelo_escolhido.get(sel, {}).get(chave_fatia(fa))
+                        padrao = fa.regressao.melhor.codigo if fa.regressao.melhor else (opcoes_m[0] if opcoes_m else None)
+                        if opcoes_m:
+                            esc = st.selectbox("Modelo usado nos gráficos e no texto", opcoes_m,
+                                               index=opcoes_m.index(atual or padrao) if (atual or padrao) in opcoes_m else 0,
+                                               format_func=lambda c: CATALOGO[c].nome, key=f"mod_{sel}_{chave_fatia(fa)}")
+                            if esc != (atual or padrao):
+                                ss.modelo_escolhido.setdefault(sel, {})[chave_fatia(fa)] = esc
+                                nova_versao()
+                                st.rerun()
+                            m = [a for a in fa.regressao.ajustes if a.codigo == esc][0]
+                            pts = {k: v for k, v in m.pontos.items() if not isinstance(v, bool)}
+                            if pts:
+                                st.caption(" · ".join(f"{k}: {exportar._fmt_str(v, exportar._decimais(v), 'pt')}"
+                                                      for k, v in pts.items()))
+                            if CATALOGO[m.codigo].familia in ("dose", "crescimento"):
+                                ua.secao_mee(res, fa, m, sel, f"{i_sel}_{j}")
+                        if fa.regressao.nota:
+                            st.caption(fa.regressao.nota)
+
+                with t_pres:
+                    tb = pr.tabela()
+                    tb["Situação"] = ["✓" if t.ok else ("✗" if t.ok is False else "") for t in pr.testes]
+                    tabela_ui(tb, f"pressupostos_{nome_base}", f"Pressupostos da ANOVA — {sel[1]}", "", f"pr_{i_sel}")
+                    if len(pr.outliers):
+                        st.markdown("**Possíveis valores discrepantes** (confira a digitação antes de excluir)")
+                        tabela_ui(pr.outliers, f"discrepantes_{nome_base}", "Possíveis valores discrepantes", "",
+                                  f"ou_{i_sel}")
+                    if pr.recomendacao:
+                        st.warning(pr.recomendacao)
+                    if pr.boxcox and pr.boxcox.get("codigo"):
+                        cbx1, cbx2 = st.columns([3, 1])
+                        cbx1.caption(f"Box-Cox: λ̂ = {pr.boxcox['lambda_hat']:.2f} "
+                                     f"(IC 95%: {pr.boxcox['ic95'][0]:.2f} a {pr.boxcox['ic95'][1]:.2f})".replace(".", ","))
+                        if cbx2.button("Aplicar sugestão e reanalisar", key=f"bc_{sel}"):
+                            ss.transf_var[sel[1]] = pr.boxcox["codigo"]
+                            reanalisar(sel, pr.boxcox["codigo"])
                             st.rerun()
-                        m = [a for a in fa.regressao.ajustes if a.codigo == esc][0]
-                        pts = {k: v for k, v in m.pontos.items() if not isinstance(v, bool)}
-                        if pts:
-                            st.caption(" · ".join(f"{k}: {exportar._fmt_str(v, exportar._decimais(v), 'pt')}" for k, v in pts.items()))
-                    if fa.regressao.nota:
-                        st.caption(fa.regressao.nota)
-
-            with t_pres:
-                tb = pr.tabela()
-                tb["Situação"] = ["✓" if t.ok else ("✗" if t.ok is False else "") for t in pr.testes]
-                st.dataframe(fmt_tabela(tb, ("p",)), hide_index=True, width="stretch")
-                if len(pr.outliers):
-                    st.markdown("**Possíveis valores discrepantes** (confira a digitação antes de excluir)")
-                    st.dataframe(fmt_tabela(pr.outliers), hide_index=True)
-                if pr.recomendacao:
-                    st.warning(pr.recomendacao)
-                if pr.boxcox and pr.boxcox.get("codigo"):
-                    cbx1, cbx2 = st.columns([3, 1])
-                    cbx1.caption(f"Box-Cox: λ̂ = {pr.boxcox['lambda_hat']:.2f} "
-                                 f"(IC 95%: {pr.boxcox['ic95'][0]:.2f} a {pr.boxcox['ic95'][1]:.2f})".replace(".", ","))
-                    if cbx2.button("Aplicar sugestão e reanalisar", key=f"bc_{sel}"):
-                        ss.transf_var[sel[1]] = pr.boxcox["codigo"]
-                        ce = ss.config_exec
-                        d = dict(ce["grupos"])[sel[0]]
-                        op = Opcoes(**{**opcoes_base, "transformacao": pr.boxcox["codigo"]})
-                        try:
-                            ss.resultados[sel] = analisar(d, ce["spec"], sel[1], op)
-                        except Exception as e:
-                            ss.resultados[sel] = e
-                        ss.cache_figs = {}
+                    if res.transformacao and st.button("Remover transformação desta variável", key=f"rt_{sel}"):
+                        ss.transf_var.pop(sel[1], None)
+                        reanalisar(sel, None)
                         st.rerun()
-                if res.transformacao and st.button("Remover transformação desta variável", key=f"rt_{sel}"):
-                    ss.transf_var.pop(sel[1], None)
-                    ce = ss.config_exec
-                    d = dict(ce["grupos"])[sel[0]]
-                    ss.resultados[sel] = analisar(d, ce["spec"], sel[1], Opcoes(**{**opcoes_base, "transformacao": None}))
-                    ss.cache_figs = {}
-                    st.rerun()
-                png_d, arq_d = fig_cache(("diag", sel, res.transformacao), lambda: relatorio.fig_diagnostico(res, cfg))
-                st.image(png_d, width="stretch")
-                botoes_download_fig(arq_d, f"diagnostico_{relatorio._slug(sel[1])}", f"diag_{sel}", vertical=False)
+                    ua.secao_exclusao(res, sel, dict(ss.config_exec["grupos"])[sel[0]],
+                                      lambda: reanalisar(sel, manter_transf=True))
+                    ua.secao_robusto(res, nome_base, f"{i_sel}")
+                    cat = catalogo(idioma)
+                    diag = [it for it in cat.values() if it.variavel == sel[1] and it.grupo == sel[0]
+                            and it.spec.tipo == "diagnostico"]
+                    for it in diag:
+                        st.image(previa(it, idioma=idioma), width="stretch")
+                        c1, c2 = st.columns([1, 3])
+                        c1.button("Editar no Estúdio", key=f"ed_diag_{it.id}", on_click=ir_para_estudio, args=(it.id,))
+                        with c2:
+                            botoes_figura(it, idioma, "diag")
 
-            with t_txt:
-                st.markdown("**Resultados (rascunho)**")
-                st.text_area("Interpretação", textos.interpretar(res, idioma), height=220, key=f"txt_{sel}_{idioma}",
-                             label_visibility="collapsed")
-                st.markdown("**Material e Métodos (rascunho)**")
-                st.text_area("Métodos", textos.metodos(spec, Opcoes(**opcoes_base), [res], idioma), height=200,
-                             key=f"met_{sel}_{idioma}", label_visibility="collapsed")
-                st.caption("Texto gerado deterministicamente a partir dos resultados — revise antes de usar.")
+                with t_ctr:
+                    ua.secao_contrastes(res, sel, nome_base, f"{i_sel}")
+
+                if t_cj is not None:
+                    with t_cj:
+                        df_all = pd.concat([filtrar_excluidas(dg, (g, sel[1])) for g, dg in ss.config_exec["grupos"]])
+                        ua.secao_conjunta(df_all, spec, sel[1], sep_col,
+                                          Opcoes(**{**opcoes_base, "transformacao": ss.transf_var.get(sel[1], transf)}),
+                                          f"{sel[1]}")
+
+                with t_txt:
+                    st.markdown("**Resultados (rascunho)**")
+                    st.text_area("Interpretação", textos.interpretar(res, idioma), height=220,
+                                 key=f"txt_{sel}_{idioma}", label_visibility="collapsed")
+                    st.markdown("**Material e Métodos (rascunho)**")
+                    st.text_area("Métodos", textos.metodos(spec, Opcoes(**opcoes_base), [res], idioma), height=200,
+                                 key=f"met_{sel}_{idioma}", label_visibility="collapsed")
+                    st.caption("Texto gerado deterministicamente a partir dos resultados — revise antes de usar.")
 
 
 # ============================================================================
-# Aba: Correlações e PCA
+# Aba: Estúdio de figuras
 # ============================================================================
-with aba_multi:
-    if ss.df is None:
-        st.info("Carregue os dados primeiro.")
-    else:
-        df = ss.df
-        numericas = [c for c in df.columns if pd.to_numeric(df[c], errors="coerce").notna().mean() > 0.8
-                     and df[c].nunique() > 5]
-        padrao = (ss.config_exec or {}).get("respostas") or numericas[:6]
-        vs = st.multiselect("Variáveis", numericas, default=[v for v in padrao if v in numericas])
-        c1, c2, c3 = st.columns(3)
-        met = c1.radio("Correlação", ["pearson", "spearman"], horizontal=True,
-                       format_func=lambda s: {"pearson": "Pearson", "spearman": "Spearman"}[s])
-        cat = [c for c in df.columns if df[c].nunique() <= 30 and c not in vs]
-        grupo = c2.selectbox("Agrupar por (tratamento)", ["(nenhum)"] + cat)
-        usar_med = c3.toggle("Usar médias dos tratamentos", value=False, disabled=grupo == "(nenhum)")
-        filtro_col = st.selectbox("Filtrar (opcional)", ["(nenhum)"] + [c for c in cat if c != grupo])
-        dsel = df
-        if filtro_col != "(nenhum)":
-            nv = st.selectbox("Nível", list(dict.fromkeys(df[filtro_col].astype(str))))
-            dsel = df[df[filtro_col].astype(str) == nv].reset_index(drop=True)
-        if len(vs) >= 2 and st.button("Calcular correlações e PCA", type="primary"):
-            g = None if grupo == "(nenhum)" else grupo
-            cor = mv.correlacoes(dsel, vs, met, agrupar_por=g if usar_med else None)
-            ss.extras["correlacao"] = cor
-            if len(vs) >= 3:
-                ss.extras["pca"] = mv.pca(dsel, vs, grupo=g, usar_medias=usar_med)
-                ss.extras["pca_grupo"] = g
-        if ss.extras.get("correlacao") is not None:
-            cor = ss.extras["correlacao"]
-            st.markdown(f"#### Correlação de {cor.metodo} ({cor.base})")
-            cfg_c = gr.ConfigGrafico(**{**cfg.__dict__, "largura_mm": max(cfg.largura_mm, 120)})
-            png_c, arq_c = fig_cache(("cor", id(cor)), lambda: gr.fig_correlacao(cor.R, cor.P, cor.nomes, cfg_c, cor.metodo))
-            a, b = st.columns([3, 1])
-            a.image(png_c, width="stretch")
-            with b:
-                botoes_download_fig(arq_c, "correlacao", "cor")
-            st.dataframe(cor.tabela("pt"), width="stretch")
-        if ss.extras.get("pca") is not None:
-            p = ss.extras["pca"]
-            st.markdown(f"#### Componentes principais ({p.base})")
-            cfg_p = gr.ConfigGrafico(**{**cfg.__dict__, "largura_mm": max(cfg.largura_mm, 120)})
-            png_p, arq_p = fig_cache(("pca", id(p)), lambda: gr.fig_pca(
-                p.escores, p.cargas, p.nomes, p.grupos, p.explicada, cfg_p, titulo_legenda=ss.extras.get("pca_grupo"),
-                rotulos_pontos=p.rotulos_linhas if p.base.startswith("médias") else None))
-            a, b = st.columns([3, 1])
-            a.image(png_p, width="stretch")
-            with b:
-                botoes_download_fig(arq_p, "pca_biplot", "pca")
-            c1, c2 = st.columns(2)
-            c1.dataframe(fmt_tabela(p.tabela_autovalores()), hide_index=True, width="stretch")
-            c2.dataframe(fmt_tabela(p.tabela_cargas().reset_index().rename(columns={"index": "Variável"})),
-                         hide_index=True, width="stretch")
+if aba_est.open:
+    with aba_est:
+        ui_estudio.render(idioma)
+
+
+# ============================================================================
+# Aba: Multivariada
+# ============================================================================
+if aba_multi.open:
+    with aba_multi:
+        if ss.df is None:
+            st.info("Carregue os dados primeiro.")
+        else:
+            df = ss.df
+            numericas = [c for c in df.columns if pd.to_numeric(df[c], errors="coerce").notna().mean() > 0.8
+                         and df[c].nunique() > 5]
+            padrao = (ss.config_exec or {}).get("respostas") or numericas[:6]
+            cat_todas = [c for c in df.columns if df[c].nunique() <= 60 and c not in numericas]
+            m_cor, m_ag, m_tr = st.tabs(["Correlações e PCA", "Agrupamento", "Análise de trilha"])
+            with m_cor:
+                vs = st.multiselect("Variáveis", numericas, default=[v for v in padrao if v in numericas])
+                c1, c2, c3 = st.columns(3)
+                met = c1.radio("Correlação", ["pearson", "spearman"], horizontal=True,
+                               format_func=lambda s: {"pearson": "Pearson", "spearman": "Spearman"}[s])
+                cat_cols = [c for c in df.columns if df[c].nunique() <= 30 and c not in vs]
+                grupo = c2.selectbox("Agrupar por (tratamento)", ["(nenhum)"] + cat_cols)
+                usar_med = c3.toggle("Usar médias dos tratamentos", value=False, disabled=grupo == "(nenhum)")
+                filtro_col = st.selectbox("Filtrar (opcional)", ["(nenhum)"] + [c for c in cat_cols if c != grupo])
+                dsel = df
+                if filtro_col != "(nenhum)":
+                    nv = st.selectbox("Nível", list(dict.fromkeys(df[filtro_col].astype(str))))
+                    dsel = df[df[filtro_col].astype(str) == nv]
+                if len(vs) >= 2 and st.button("Calcular correlações e PCA", type="primary"):
+                    g = None if grupo == "(nenhum)" else grupo
+                    ss.extras["correlacao"] = mv.correlacoes(dsel, vs, met, agrupar_por=g if usar_med else None)
+                    if len(vs) >= 3:
+                        ss.extras["pca"] = mv.pca(dsel, vs, grupo=g, usar_medias=usar_med)
+                        ss.extras["pca_grupo"] = g
+                    nova_versao()
+                cat = catalogo(idioma)
+                if ss.extras.get("correlacao") is not None:
+                    cor = ss.extras["correlacao"]
+                    titulo_secao(1, f"Correlação de {cor.metodo} ({cor.base})")
+                    mostrar_figuras([cat["multi::correlacao"]], "cor")
+                    tc = cor.tabela("pt").reset_index().rename(columns={"index": "Variável"})
+                    tabela_ui(tc, "correlacoes", f"Correlação de {cor.metodo} ({cor.base})",
+                              "* p < 0,05; ** p < 0,01; *** p < 0,001", "cor")
+                if ss.extras.get("pca") is not None:
+                    p = ss.extras["pca"]
+                    titulo_secao(2, f"Componentes principais ({p.base})")
+                    mostrar_figuras([cat["multi::pca"]], "pca")
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        tabela_ui(p.tabela_autovalores(), "pca_autovalores", "Autovalores e variância explicada", "",
+                                  "pca_a")
+                    with c2:
+                        tabela_ui(p.tabela_cargas().reset_index().rename(columns={"index": "Variável"}), "pca_cargas",
+                                  "Correlação entre variáveis e componentes", "", "pca_c")
+            with m_ag:
+                ua.secao_agrupamento(df, numericas, cat_todas, padrao, mostrar_figuras, idioma)
+            with m_tr:
+                ua.secao_trilha(df, numericas, cat_todas)
+
+
+# ============================================================================
+# Aba: Planejamento
+# ============================================================================
+if aba_plan.open:
+    with aba_plan:
+        ua.aba_planejamento()
 
 
 # ============================================================================
 # Aba: Downloads
 # ============================================================================
-with aba_down:
-    if not ss.resultados:
-        st.info("Execute a análise para gerar os arquivos.")
-    else:
-        ce = ss.config_exec
-        grupos_nomes = list(dict.fromkeys(k[0] for k in ss.resultados))
-        st.markdown("#### Planilha de resultados")
-        st.caption("ANOVA, médias com letras, desdobramentos, regressões ranqueadas, pressupostos, estatística "
-                   "descritiva, correlações/PCA (se calculadas) e rascunho de Métodos e Resultados.")
-        for g in grupos_nomes:
-            res_g = [r for (gg, v), r in ss.resultados.items() if gg == g and not isinstance(r, Exception)]
-            erros = {v: str(r) for (gg, v), r in ss.resultados.items() if gg == g and isinstance(r, Exception)}
-            if not res_g:
-                continue
-            dados_g = dict(ce["grupos"])[g]
-            xls = exportar.gerar_excel(res_g, ce["opcoes"], idioma, extras={**ss.extras, "erros": erros},
-                                       dados_brutos=dados_g, com_ep=com_ep)
-            nome = "resultados" + (f"_{relatorio._slug(g)}" if g else "") + ".xlsx"
-            st.download_button(f"Baixar Excel{' — ' + g if g else ''}", xls, file_name=nome, type="primary",
-                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"xl_{g}")
-        st.markdown("#### Pacote de figuras")
-        formatos = st.multiselect("Formatos", ["png", "svg", "pdf", "tiff"], default=["png", "svg"],
-                                  help="PNG e TIFF em 600 dpi; SVG com texto editável; PDF vetorial.")
-        incl_diag = st.toggle("Incluir gráficos de diagnóstico dos resíduos", value=False)
-        if st.button("Gerar pacote (.zip)"):
-            itens = []
-            with st.spinner("Gerando figuras…"):
-                for (g, v), r in ss.resultados.items():
-                    if isinstance(r, Exception):
-                        continue
-                    camadas = [i for i, f in enumerate(r.spec.fatores)
-                               if relatorio.parece_camada(f.coluna) or relatorio.parece_camada(f.rotulo)]
-                    for nome, titulo, fig in relatorio.figuras_para(r, cfg, ss.rotulos_y.get(v, v),
-                                                                    camadas[0] if camadas else None):
-                        itens.append((g or "", nome, fig))
-                    if incl_diag:
-                        itens.append((g or "", f"diagnostico_{relatorio._slug(v)}", relatorio.fig_diagnostico(r, cfg)))
-                ss.zip_figs = relatorio.zip_figuras(itens, cfg, formatos)
-        if ss.get("zip_figs"):
-            st.download_button("Baixar figuras (.zip)", ss.zip_figs, file_name="figuras.zip", mime="application/zip")
+if aba_down.open:
+    with aba_down:
+        if not ss.resultados:
+            st.info("Execute a análise para gerar os arquivos.")
+        else:
+            ce = ss.config_exec
+            grupos_nomes = list(dict.fromkeys(k[0] for k in ss.resultados))
+            extras_tab = list(ss.tabelas_extra.values())
+            titulo_secao(1, "Planilha de resultados (Excel)")
+            st.caption("ANOVA com tamanhos de efeito, médias com letras, desdobramentos, regressões ranqueadas, "
+                       "pressupostos e alternativas robustas, descritiva, correlações/PCA, contrastes, MEE, análise "
+                       "conjunta, agrupamento e trilha (quando calculados) e rascunho de Métodos e Resultados.")
+            cols_dl = st.columns(3)
+            for n_g, g in enumerate(grupos_nomes):
+                res_g = [r for (gg, v), r in ss.resultados.items() if gg == g and not isinstance(r, Exception)]
+                erros = {v: str(r) for (gg, v), r in ss.resultados.items() if gg == g and isinstance(r, Exception)}
+                if not res_g:
+                    continue
+                dados_g = dict(ce["grupos"])[g]
+                nome = "resultados" + (f"_{relatorio._slug(g)}" if g else "") + ".xlsx"
+                cols_dl[n_g % len(cols_dl)].download_button(
+                    f"Excel{' — ' + g if g else ''}",
+                    data=(lambda r=res_g, e=erros, dg=dados_g, ex=dict(ss.extras), op=ce["opcoes"]: exportar.gerar_excel(
+                        r, op, idioma, extras={**ex, "erros": e, "tabelas": extras_tab},
+                        dados_brutos=dg, com_ep=com_ep)),
+                    file_name=nome, type="primary", width="stretch",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"xl_{g}")
+
+            titulo_secao(2, "Relatório completo (Word)")
+            st.caption("Material e Métodos, interpretação de cada variável, ANOVA e médias no padrão de periódico "
+                       "(filetes 1,0/0,5 pt), figuras com legenda numerada e as análises complementares calculadas.")
+            r1, r2, r3 = st.columns([3, 2, 2])
+            tit_rel = r1.text_input("Título do relatório", value="Relatório de análise estatística", key="rel_tit")
+            incl_fig = r2.toggle("Incluir figuras", value=True, key="rel_fig")
+            fonte_rel = r3.selectbox("Fonte do documento", ["Roboto", "Arial", "Calibri", "Times New Roman"],
+                                     key="rel_fonte")
+            from ui_comum import tema_figura
+            cols_rel = st.columns(3)
+            for n_g, g in enumerate(grupos_nomes):
+                res_g = [r for (gg, v), r in ss.resultados.items() if gg == g and not isinstance(r, Exception)]
+                if not res_g:
+                    continue
+                cat = catalogo(idioma)
+                itens_g = [it for it in cat.values() if it.grupo == g and it.variavel != "Multivariada"]
+                temas_g = {it.id: tema_figura(it.id, it.spec.tipo) for it in itens_g}
+                nome = "relatorio" + (f"_{relatorio._slug(g)}" if g else "") + ".docx"
+                cols_rel[n_g % len(cols_rel)].download_button(
+                    f"Word{' — ' + g if g else ''}",
+                    data=(lambda r=res_g, it=itens_g, gg=g, tg=temas_g, op=ce["opcoes"]: relatorio_docx.gerar_relatorio(
+                        r, op, it, lambda x: tg[x.id], idioma, fonte_rel,
+                        tit_rel + (f" — {gg}" if gg else ""), incl_fig, com_ep, extras={"tabelas": extras_tab})),
+                    file_name=nome, type="primary", width="stretch",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", key=f"doc_{g}")
+
+            titulo_secao(3, "Pacote de figuras")
+            st.caption("Cada figura sai com o tema global e os ajustes feitos no Estúdio.")
+            formatos = st.multiselect("Formatos", ["png", "svg", "pdf", "tiff"], default=["png", "svg"],
+                                      help="PNG e TIFF na resolução do tema; SVG com texto editável; PDF vetorial.")
+            incl_diag = st.toggle("Incluir gráficos de diagnóstico dos resíduos", value=False)
+            if st.button("Gerar pacote (.zip)", key="gerar_zip"):
+                from ui_comum import tema_figura
+                import zipfile
+                from motor import figuras as fg
+                cat = catalogo(idioma)
+                buf = io.BytesIO()
+                barra = st.progress(0.0, text="Gerando figuras…")
+                itens = [it for it in cat.values() if incl_diag or it.spec.tipo != "diagnostico"]
+                with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+                    for n_, it in enumerate(itens):
+                        t = tema_figura(it.id, it.spec.tipo)
+                        pasta = relatorio._slug(it.grupo) + "/" if it.grupo else ""
+                        for fmt in formatos:
+                            z.writestr(f"{pasta}{fmt}/{it.nome}.{fmt}", fg.gerar_arquivo(it.spec, t, fmt, idioma))
+                        barra.progress((n_ + 1) / max(len(itens), 1), text=f"{it.titulo}")
+                    z.writestr("tema_global.json", tm.para_json({**tm.PRESETS.get(ss.tema_preset, {}), **ss.tema_global}))
+                barra.empty()
+                ss.zip_figs = buf.getvalue()
+            if ss.get("zip_figs"):
+                st.download_button("Baixar figuras (.zip)", ss.zip_figs, file_name="figuras.zip", mime="application/zip")
+
+            titulo_secao(4, "Projeto")
+            st.caption("Um único arquivo com os dados, o delineamento, as opções, os modelos escolhidos, as exclusões e "
+                       "todos os estilos de figura. Reabra pela barra lateral (Projeto) para continuar de onde parou.")
+            nome_proj = relatorio._slug(str(ss.nome_arquivo or "projeto").split(":")[0].rsplit(".", 1)[0]) or "projeto"
+
+            # valores capturados agora: o download roda fora da sessão (sem acesso ao session_state)
+            cfg_p = dict(spec=ce["spec"], opcoes=ce["opcoes"], separar=ce.get("separar"), respostas=ce["respostas"])
+            est_p = {k: ss.get(k) for k in ("transf_var", "modelo_escolhido", "rotulos_y", "tema_preset",
+                                            "tema_global", "ajustes", "painel_cfg", "painel_tema", "excluir")}
+
+            def _bytes_projeto(df_=ss.df, nome_=ss.nome_arquivo, cfg_=cfg_p, est_=est_p):
+                return projeto.salvar(df_, nome_, cfg_, est_)
+            st.download_button("Salvar projeto (.estatexp)", data=_bytes_projeto, file_name=f"{nome_proj}.estatexp",
+                               mime="application/zip", type="primary", key="dl_proj")
 
 
 # ============================================================================
 # Aba: Guia
 # ============================================================================
-with aba_guia:
-    st.markdown("""
+if aba_guia.open:
+    with aba_guia:
+        st.markdown("""
 #### Delineamentos suportados
 | Estrutura | DIC | DBC | DQL |
 |---|---|---|---|
@@ -665,23 +949,52 @@ with aba_guia:
 | Faixas (strip-plot) | — | ✓ | — |
 
 #### O que o motor faz
-- **ANOVA** com somas de quadrados exatas. Em delineamentos de um estrato, usa médias ajustadas (mínimos quadrados) e
-  testes equivalentes à SQ tipo III, válidos também com parcelas perdidas. Em parcelas subdivididas e faixas, cada
-  efeito é testado contra o erro do seu estrato.
-- **Pressupostos**: Shapiro-Wilk e Anderson-Darling (normalidade dos resíduos), Bartlett e Levene/Brown-Forsythe
-  (homogeneidade), não aditividade de Tukey (DBC), resíduos studentizados > 3 (discrepantes) e Box-Cox (sugestão de transformação).
-- **Testes de médias**: Tukey (Tukey-Kramer se desbalanceado), Scott-Knott, LSD, Duncan, SNK, Bonferroni e Dunnett.
-- **Interações**: desdobramento automático de cada fator dentro dos níveis dos fatores com que interage. Quando o
-  desdobramento cruza estratos de erro, usa o erro combinado com GL de Satterthwaite.
-- **Regressão** para fatores quantitativos: decomposição polinomial na ANOVA e 12 modelos candidatos (linear,
-  quadrático, cúbico, raiz quadrada, logarítmico, Mitscherlich, linear-platô, quadrático-platô, exponencial, potência,
-  Michaelis-Menten e logístico), ranqueados por adequação (falta de ajuste, significância dos parâmetros,
-  plausibilidade) e AICc, com pontos notáveis (máxima eficiência técnica, platô, doses para 90/95% do máximo).
-- **Fatorial + adicional**: decomposição de tratamentos em fatorial, fatorial vs. adicional(is) e entre adicionais,
-  comparação de todos os tratamentos e Dunnett contra cada testemunha.
+- **ANOVA** com somas de quadrados exatas; médias ajustadas e SQ tipo III em delineamentos de um estrato (aceita
+  parcelas perdidas); cada efeito testado contra o erro do seu estrato em parcelas subdivididas e faixas.
+- **Pressupostos**: Shapiro-Wilk, Anderson-Darling, Bartlett, Levene/Brown-Forsythe, não aditividade de Tukey,
+  resíduos studentizados e Box-Cox.
+- **Testes de médias**: Tukey (Tukey-Kramer), Scott-Knott, LSD, Duncan, SNK, Bonferroni e Dunnett, com desdobramento
+  automático das interações (erro combinado e GL de Satterthwaite quando cruza estratos).
+- **Regressão** (fatores quantitativos), em quatro famílias:
+  - *Resposta a doses*: linear, quadrático, cúbico, raiz, logarítmico, Mitscherlich, linear-platô, quadrático-platô,
+    exponencial, potência e Michaelis-Menten;
+  - *Crescimento e acúmulo*: logístico, Gompertz e Weibull;
+  - *Isotermas de adsorção*: Langmuir (com capacidade máxima de adsorção), Freundlich, Temkin e Sips;
+  - *Cinéticas*: primeira ordem (Stanford & Smith / pseudo-1ª ordem, com meia-vida), pseudo-segunda ordem, Elovich,
+    difusão parabólica e dois compartimentos.
 
-#### Gráficos
-Roboto, 7 pt no tamanho final, sem grade e sem negrito, barras de erro-padrão, observações semitransparentes,
-larguras de coluna de periódico (89/120/183 mm). PNG e TIFF em 600 dpi, SVG com texto editável e PDF vetorial.
-A paleta de cores foi validada para daltonismo e todos os grupos também são diferenciados pela forma do marcador.
+  Os modelos são ranqueados por adequação e AICc. A coluna **Falta de ajuste** mostra o veredito do teste F:
+  “não detectada ✓” (p alto) indica que a curva descreve bem as médias.
+
+#### Estúdio de figuras
+Cada figura pode ser ajustada em detalhe: tamanho em mm e resolução, 8 famílias de fonte e tamanhos por elemento,
+eixos (limites, intervalos, marcas, eixo quebrado, eixos destacados, separador decimal), cor/marcador/linha de cada
+grupo, nomes, ordem e ocultação de níveis, tipo de gráfico (pontos, barras, box, violino, raincloud, beeswarm),
+barras de erro (EP, DP, IC95, só superior, traço terminal), letras, colchetes de significância, linhas de referência,
+textos livres, legenda e equações (com faixa de confiança da curva). O modo **Painel** monta figuras com vários
+gráficos e rótulos a/b/c; o modo **Tema global** define o padrão de todas as figuras, que pode ser salvo e
+recarregado como arquivo .json.
+
+#### Análises complementares (v2.1)
+- **Tamanhos de efeito** na ANOVA: η²p e ω²p (ω²p é menos enviesado em amostras pequenas).
+- **Intervalos de confiança** das médias e das diferenças par a par (simultâneos para Tukey, Bonferroni e Dunnett).
+- **Pressupostos violados?** Na aba Pressupostos: ANOVA de Welch + Games-Howell (variâncias desiguais),
+  Kruskal-Wallis + Dunn e Friedman + Conover (postos), com p ajustados por Holm; e exclusão de observações pelo
+  número da linha da planilha, com reanálise imediata.
+- **Contrastes** definidos por você (testemunha vs. demais, Helmert…), com estimativa, IC 95%, F e verificação de
+  ortogonalidade, sobre tratamentos ou níveis de um fator; o erro respeita o estrato.
+- **MEE** (máxima eficiência econômica) para modelos de dose, a partir dos preços do insumo e do produto.
+- **Parcelas perdidas em parcelas subdivididas**: a análise passa automaticamente para modelo misto (REML), com F de
+  Wald e GL por contenção; as linhas de erro mostram os componentes de variância.
+- **Análise conjunta**: use “Analisar separadamente por” (local, safra) e abra a sub-aba Análise conjunta. Razão de
+  Hartley < 7 indica homogeneidade; com ambientes aleatórios os tratamentos são testados contra a interação.
+- **Multivariada**: agrupamento hierárquico (UPGMA, Ward…; corte de Mojena; dendrograma editável no Estúdio) e
+  análise de trilha (efeitos diretos e indiretos, VIF, número de condição, opção em crista).
+- **Planejamento**: repetições necessárias para um poder desejado e DMS esperada, a partir do CV.
+- **Relatório Word** e **arquivo de projeto** na aba Downloads; o projeto reabre pela barra lateral.
+
+#### Tabelas
+Toda tabela tem botões **Excel** e **Word** no padrão de periódico: filetes de 1,0 pt acima e abaixo, 0,5 pt sob o
+cabeçalho, sem linhas verticais e apenas o cabeçalho em negrito (no Excel, as espessuras equivalentes são “média”
+e “fina”; no Word, exatas).
 """)

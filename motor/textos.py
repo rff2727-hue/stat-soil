@@ -234,7 +234,8 @@ def interpretar(res, idioma="pt"):
     if pt:
         s = f"Coeficiente(s) de variação: {cv}."
         if pr.ok_normalidade is False or pr.ok_homogeneidade is False:
-            s += " Atenção: " + pr.recomendacao
+            s += " Atenção: " + (pr.recomendacao or "os pressupostos da ANOVA não foram plenamente atendidos; veja a "
+                                 "aba Pressupostos e as alternativas robustas/não paramétricas.")
         frases.append(s)
     else:
         cv = cv.replace("CV", "CV").replace(",", ".")
@@ -242,5 +243,6 @@ def interpretar(res, idioma="pt"):
         if pr.ok_normalidade is False or pr.ok_homogeneidade is False:
             s += " Caution: ANOVA assumptions were not fully met (see assumptions sheet)."
         frases.append(s)
-    frases = [f[:1].upper() + f[1:] for f in frases if f]
+    # maiúscula inicial, preservando símbolos como "pH" ou "mS"
+    frases = [f if (len(f) > 1 and f[1].isupper()) else f[:1].upper() + f[1:] for f in frases if f]
     return " ".join(frases)
