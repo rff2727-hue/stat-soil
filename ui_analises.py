@@ -23,10 +23,10 @@ def guardar_tabela(chave, aba, titulo, df, nota=""):
     ss.tabelas_extra[chave] = dict(aba=aba, titulo=titulo, df=df, nota=nota)
 
 
-def leitura(rotulo, valor, sub=""):
-    """Mostrador numérico no estilo do painel (sem mostradores analógicos)."""
-    st.html(f"<div class='leitura'><div class='leitura-rot'>{rotulo}</div>"
-            f"<div class='leitura-val'>{valor}</div><div class='leitura-sub'>{sub}</div></div>")
+def leitura(rotulo, valor, sub="", led=None):
+    """Mostrador numérico (cristal líquido) — ver estilo.mostrador."""
+    import estilo
+    estilo.mostrador(rotulo, valor, sub, led)
 
 
 # ============================================================================

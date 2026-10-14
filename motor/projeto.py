@@ -76,7 +76,7 @@ def _df_de_json(txt: str) -> pd.DataFrame:
 def salvar(df, nome_arquivo, config, estado) -> bytes:
     """config: dict(spec, opcoes, separar, respostas); estado: dicionários de interface."""
     meta = {
-        "plataforma": "Estatística Experimental", "versao_projeto": VERSAO, "arquivo_dados": nome_arquivo,
+        "plataforma": "Stat-Soil", "versao_projeto": VERSAO, "arquivo_dados": nome_arquivo,
         "spec": _spec_dict(config["spec"]), "opcoes": dataclasses.asdict(config["opcoes"]),
         "separar": config.get("separar"), "respostas": list(config.get("respostas") or []),
         "transf_var": estado.get("transf_var", {}),
@@ -99,7 +99,7 @@ def carregar(conteudo: bytes):
     with zipfile.ZipFile(io.BytesIO(conteudo)) as z:
         meta = json.loads(z.read("projeto.json").decode("utf-8"))
         df = _df_de_json(z.read("dados.json").decode("utf-8"))
-    if meta.get("plataforma") != "Estatística Experimental":
+    if meta.get("plataforma") not in ("Stat-Soil", "Estatística Experimental"):
         raise ValueError("Arquivo não é um projeto da plataforma.")
     spec = _spec_de_dict(dict(meta["spec"]))
     op = Opcoes(**meta["opcoes"])

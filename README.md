@@ -1,4 +1,4 @@
-# Estatística Experimental · v2.1
+# Stat-Soil · v2.2
 
 Plataforma web para análise estatística de experimentos agronômicos, no mesmo padrão da plataforma de
 recomendação de solo: **Python + motor determinístico + Streamlit**, entrada e saída em **Excel**, hospedagem
@@ -21,6 +21,23 @@ gratuita no **Streamlit Community Cloud**.
 | Planejamento | número de repetições pelo poder do teste F (F não central) e DMS de Tukey esperada a partir do CV |
 | Textos | rascunho automático de Material e Métodos e de Resultados (pt/en) |
 | Saídas | Excel com tabelas em padrão de periódico; **relatório Word completo** (Métodos, resultados, tabelas 1,0/0,5 pt e figuras com legenda); gráficos em PNG/TIFF 600 dpi, SVG editável e PDF; **arquivo de projeto .estatexp** para reabrir tudo depois |
+
+## Novidades da v2.2
+
+- **Nome e identidade Stat-Soil**: logos novas no cabeçalho e na barra lateral, padronagem "horizonte do solo",
+  ícone do navegador.
+- **Temas claro e escuro de verdade** (bancada bege e painel grafite, este um pouco mais claro), alternados no menu
+  ⋮ → Settings → Theme; mostradores de cristal líquido, teclas com LED, etiquetas de rotulador e grão de papel.
+- **Uma família tipográfica** em toda a plataforma (Archivo, larguras normal e expandida), inclusive na barra lateral;
+  DSEG14 apenas nos mostradores numéricos.
+- **Correções relatadas**: o modelo de regressão agora pode ser trocado ao lado do gráfico (Ajuste rápido), na aba
+  Regressão e no Estúdio, e as escolhas ficam sincronizadas; os valores individuais podem ser ligados/desligados em
+  todos os tipos de gráfico, inclusive barras, direto no Ajuste rápido.
+- **Estúdio inspirado no OriginPro**: barra rápida, busca de opções, desfazer, copiar/colar formato por partes,
+  novos tipos (meia-caixa, meio-violino, linhas de interação), rótulos de valor, contorno automático, escalas
+  log10/log2/ln/raiz, fator 10ⁿ, separador de milhar, texto formatado (sobrescrito, subscrito, itálico, grego),
+  faixas sombreadas, setas e formas, faixa de predição, mesma escala Y em painéis, EPS e TIFF CMYK.
+- **Layout**: gráficos em grade de cartões com ações logo abaixo, cabeçalho com o estado de cada etapa.
 
 ## Novidades da v2.1
 
@@ -77,7 +94,8 @@ motor/
   textos.py             Material e Métodos e interpretação automáticos
   exemplos.py           dados simulados de cada delineamento
 assets/fonts/           Roboto, Inter, Source Sans 3, IBM Plex, Lato, Open Sans, Liberation (OFL) — figuras
-static/fonts/           Archivo e JetBrains Mono (OFL) — interface
+static/fonts/           Archivo (variável), DSEG14 e JetBrains Mono (OFL) — interface
+estilo.py               identidade visual (CSS dos dois temas, cabeçalho, mostradores, etiquetas)
 tests/                  validação contra statsmodels/SciPy e fórmulas de livro
 exemplos/dados_ref.xlsx experimento real usado como referência
 ```
@@ -87,7 +105,7 @@ exemplos/dados_ref.xlsx experimento real usado como referência
 ```bash
 pip install -r requirements.txt
 streamlit run app.py
-python -m pytest -q        # 25 testes de validação
+python -m pytest -q        # testes de validação
 ```
 
 ## Publicar no Streamlit Community Cloud
@@ -96,8 +114,8 @@ python -m pytest -q        # 25 testes de validação
 2. Em <https://share.streamlit.io>, **Create app** → selecione o repositório, branch `main`, arquivo `app.py`.
 3. Em *Advanced settings*, escolha Python 3.11 ou 3.12. Deploy.
 
-Identidade visual: coloque o logotipo em `assets/logo.png` (e, se quiser, `assets/icone.png` para a aba do
-navegador). As cores e fontes da interface estão em `.streamlit/config.toml` (o `server.enableStaticServing` precisa ficar
+Identidade visual: as logos ficam em `assets/` (`logo_completo.png`, `logo_emblema.png`, `logo_marca.png`,
+`icone.png`). As cores e fontes da interface estão em `.streamlit/config.toml` (o `server.enableStaticServing` precisa ficar
 ativo para as fontes embutidas); a paleta dos gráficos, em `motor/graficos.py`
 (`PALETA`, validada para daltonismo).
 

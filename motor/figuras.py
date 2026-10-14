@@ -86,6 +86,9 @@ class Curva:
     obs_y: np.ndarray | None = None
     modelo: object = None                    # AjusteModelo
     sig: bool = True
+    qm_erro: float | None = None             # para a faixa de predição
+    ajustes: list = field(default_factory=list)   # modelos alternativos (para trocar no Estúdio)
+    chave: tuple | None = None               # (fator, condição) — liga a curva à escolha de modelo
 
 
 @dataclass
@@ -232,10 +235,15 @@ def rc(t) -> dict:
         "legend.edgecolor": t["eixos.cor"],
         "lines.linewidth": t["series.linha_esp"],
         "errorbar.capsize": t["erro.chapeu"],
-        "svg.fonttype": "none",
+        "svg.fonttype": "path" if t["tela.svg_texto"] == "contornos" else "none",
         "pdf.fonttype": 42,
         "ps.fonttype": 42,
         "mathtext.default": "regular",
+        "mathtext.fontset": "custom",
+        "mathtext.rm": familia(t),
+        "mathtext.it": f"{familia(t)}:italic",
+        "mathtext.bf": f"{familia(t)}:bold",
+        "hatch.linewidth": t["medias.hachura_esp"],
         "figure.constrained_layout.h_pad": 0.02 * t["tela.margem"] / 0.3,
         "figure.constrained_layout.w_pad": 0.02 * t["tela.margem"] / 0.3,
     }
@@ -250,16 +258,68 @@ def _sep(t, idioma="pt"):
     return "," if idioma == "pt" else "."
 
 
-def _formatador(t, decimais, idioma):
+def _formatador(t, decimais, idioma, fator=0):
     sep = _sep(t, idioma)
+    milhar = bool(t.get("eixos.milhar"))
+    sep_mil = "." if sep == "," else ","
+    div = 10.0 ** int(fator or 0)
 
     def f(v, pos=None):
+        v = v / div
         if decimais is None or decimais < 0:
             s = f"{v:g}" if abs(v) < 1e6 else f"{v:.3g}"
+            if milhar and abs(v) >= 1000 and "e" not in s:
+                d = len(s.split(".")[1]) if "." in s else 0
+                s = f"{v:,.{d}f}"
         else:
-            s = f"{v:.{decimais}f}"
-        return s.replace(".", sep).replace("-", "−")
+            s = f"{v:,.{decimais}f}" if milhar else f"{v:.{decimais}f}"
+        if milhar:
+            s = s.replace(",", "\0").replace(".", sep).replace("\0", sep_mil)
+        else:
+            s = s.replace(".", sep)
+        return s.replace("-", "−")
     return ticker.FuncFormatter(f)
+
+
+ESCALAS = {"log10": ("log", 10), "log2": ("log", 2), "ln": ("log", math.e)}
+
+
+def _escala(t, eixo):
+    e = t.get(f"eixos.{eixo}_escala", "linear")
+    if eixo == "y" and e == "linear" and t.get("eixos.y_log"):
+        e = "log10"
+    return e
+
+
+def _aplicar_escala(ax, t, eixo, idioma, decimais):
+    """Escalas do OriginPro mais usadas: log10, log2, ln e raiz quadrada."""
+    e = _escala(t, eixo)
+    if e == "linear":
+        return False
+    axis = ax.yaxis if eixo == "y" else ax.xaxis
+    setter = ax.set_yscale if eixo == "y" else ax.set_xscale
+    if e == "raiz quadrada":
+        setter("function", functions=(lambda v: np.sqrt(np.clip(v, 0, None)), lambda v: np.square(v)))
+        axis.set_major_formatter(_formatador(t, decimais, idioma))
+        return True
+    base = ESCALAS[e][1]
+    setter("log", base=base)
+    if e == "ln":
+        sup = str.maketrans("-0123456789", "⁻⁰¹²³⁴⁵⁶⁷⁸⁹")
+        axis.set_major_locator(ticker.LogLocator(base=math.e))
+        axis.set_major_formatter(ticker.FuncFormatter(
+            lambda v, p=None: "e" + str(int(round(math.log(v)))).translate(sup) if v > 0 else ""))
+    else:
+        lo, hi = (ax.get_ylim() if eixo == "y" else ax.get_xlim())
+        lo, hi = max(min(lo, hi), 1e-12), max(lo, hi)
+        decadas = math.log(hi / lo, base) if hi > lo else 0
+        subs = (1.0,) if decadas >= 3 else (1.0, 2.0, 5.0) if decadas >= 1.2 else tuple(np.arange(1.0, base if base > 2 else 2.0))
+        if base == 2:
+            subs = (1.0,) if decadas >= 2 else (1.0, 1.5)
+        axis.set_major_locator(ticker.LogLocator(base=base, subs=subs))
+        axis.set_major_formatter(_formatador(t, decimais, idioma))
+    axis.set_minor_formatter(ticker.NullFormatter())
+    return True
 
 
 def _num(v, t, idioma, dig=3):
@@ -285,20 +345,19 @@ def estilizar_eixo(ax, t, idioma="pt", x_categorico=False, y_categorico=False):
     for lab in ax.get_xticklabels() + ax.get_yticklabels():
         lab.set_fontweight(t["fonte.peso_numeros"])
     if not y_categorico:
-        if t["eixos.y_log"]:
-            ax.set_yscale("log")
-        else:
-            ax.yaxis.set_major_formatter(_formatador(t, t["eixos.y_decimais"], idioma))
+        if not _aplicar_escala(ax, t, "y", idioma, t["eixos.y_decimais"]):
+            ax.yaxis.set_major_formatter(_formatador(t, t["eixos.y_decimais"], idioma, t["eixos.y_fator"]))
             if t["eixos.y_passo"]:
                 ax.yaxis.set_major_locator(ticker.MultipleLocator(float(t["eixos.y_passo"])))
             if t["eixos.marcas_menores"]:
                 ax.yaxis.set_minor_locator(ticker.AutoMinorLocator(int(t["eixos.marcas_menores"]) + 1))
     if not x_categorico:
-        ax.xaxis.set_major_formatter(_formatador(t, t["eixos.x_decimais"], idioma))
-        if t["eixos.x_passo"]:
-            ax.xaxis.set_major_locator(ticker.MultipleLocator(float(t["eixos.x_passo"])))
-        if t["eixos.marcas_menores"]:
-            ax.xaxis.set_minor_locator(ticker.AutoMinorLocator(int(t["eixos.marcas_menores"]) + 1))
+        if not _aplicar_escala(ax, t, "x", idioma, t["eixos.x_decimais"]):
+            ax.xaxis.set_major_formatter(_formatador(t, t["eixos.x_decimais"], idioma))
+            if t["eixos.x_passo"]:
+                ax.xaxis.set_major_locator(ticker.MultipleLocator(float(t["eixos.x_passo"])))
+            if t["eixos.marcas_menores"]:
+                ax.xaxis.set_minor_locator(ticker.AutoMinorLocator(int(t["eixos.marcas_menores"]) + 1))
     if t["eixos.x_rotacao"]:
         plt.setp(ax.get_xticklabels(), rotation=t["eixos.x_rotacao"], ha="right", rotation_mode="anchor")
     if t["eixos.grade"]:
@@ -313,10 +372,13 @@ def _rotulos_eixos(ax, t, rx, ry):
               fontstyle="italic" if t["fonte.italico_titulos"] else "normal")
     rx = t["eixos.rotulo_x"] or rx
     ry = t["eixos.rotulo_y"] or ry
+    n = int(t.get("eixos.y_fator") or 0)
+    if ry and n and _escala(t, "y") == "linear":
+        ry = f"{ry} (×10{str(n).translate(str.maketrans('0123456789', '⁰¹²³⁴⁵⁶⁷⁸⁹'))})"
     if rx is not None:
-        ax.set_xlabel(rx, **kw)
+        ax.set_xlabel(tm.rico(rx), **kw)
     if ry is not None:
-        ax.set_ylabel(ry, **kw)
+        ax.set_ylabel(tm.rico(ry), **kw)
 
 
 def _limites_y(ax, t, lo, hi, folga_sup=0.06, zero=False):
@@ -327,8 +389,13 @@ def _limites_y(ax, t, lo, hi, folga_sup=0.06, zero=False):
         ymin = float(t["eixos.y_min"])
     if t["eixos.y_max"] is not None:
         ymax = float(t["eixos.y_max"])
-    if not t["eixos.y_log"]:
+    if _escala(t, "y") == "linear":
         ax.set_ylim(ymin, ymax)
+    elif _escala(t, "y") == "raiz quadrada":
+        ax.set_ylim(max(ymin, 0), ymax)
+    else:
+        ax.set_ylim(ymin if (t["eixos.y_min"] is not None and ymin > 0) else None,
+                    ymax * (1.0 if t["eixos.y_max"] is not None else 1.12) if ymax > 0 else None)
 
 
 def _cor_erro(t, cor):
@@ -374,7 +441,7 @@ def _legenda(ax, t, handles, labels, titulo=None, padrao="automática", n_itens=
         pos = padrao
     ncol = t["legenda.colunas"] or None
     dx, dy = t["legenda.dx"], t["legenda.dy"]
-    kw = dict(title=titulo if (t["legenda.titulo"] and titulo) else None, frameon=t["legenda.moldura"],
+    kw = dict(title=tm.rico(titulo) if (t["legenda.titulo"] and titulo) else None, frameon=t["legenda.moldura"],
               fontsize=t["fonte.legenda"], title_fontsize=t["fonte.legenda"], alignment="left")
     mapa = {
         "dentro — sup. esquerda": dict(loc="upper left", bbox_to_anchor=(0 + dx, 1 + dy)),
@@ -449,6 +516,15 @@ def desenhar_medias(ax, sp: SpecMedias, t, idioma="pt", legenda=True):
         dx_obs = -0.24
     if tipo == "beeswarm":
         dx_obs, dx_med = -0.06, 0.24
+    if tipo in ("meia-caixa", "meio-violino"):
+        dx_obs = -0.17
+        dx_med = 0.14 if tipo == "meia-caixa" else 0.10
+    if tipo == "linhas":
+        tipo_lin, tipo = True, "pontos"
+        if mostrar_obs and t["medias.obs_lado"]:
+            dx_obs, dx_med = -0.12, 0.14
+    else:
+        tipo_lin = False
 
     def sc(x, y, **kw):
         return ax.scatter(y, x, **kw) if H else ax.scatter(x, y, **kw)
@@ -460,27 +536,31 @@ def desenhar_medias(ax, sp: SpecMedias, t, idioma="pt", legenda=True):
         if tipo == "barras":
             fc = (t["medias.barra_cor"] if (not t["series.colorir_niveis"] and not t["grupos.cores"].get(ordem[j]))
                   else cor)
-            kw = dict(color=to_rgba(fc, t["medias.barra_alfa"]), edgecolor=t["medias.contorno_cor"],
-                      linewidth=t["medias.contorno_esp"], hatch=hach, zorder=1)
+            auto = t["medias.contorno_auto"]
+            kw = dict(color=to_rgba(fc, t["medias.barra_alfa"]),
+                      edgecolor=_escurecer(fc) if auto else t["medias.contorno_cor"],
+                      linewidth=t["medias.contorno_esp"] or (0.6 if auto else 0), hatch=hach, zorder=1)
             if H:
                 ax.barh(pos[j], med[j], height=larg, **kw)
             else:
                 ax.bar(pos[j], med[j], width=larg, **kw)
-        elif tipo in ("box", "raincloud") and len(vals[j]) >= 2:
-            w = larg if tipo == "box" else larg * 0.22
-            p = pos[j] + (0 if tipo == "box" else 0.0)
+        elif tipo in ("box", "raincloud", "meia-caixa") and len(vals[j]) >= 2:
+            w = {"box": larg, "raincloud": larg * 0.22, "meia-caixa": larg * 0.34}[tipo]
+            p = pos[j] + (dx_med if tipo == "meia-caixa" else 0.0)
             bp = ax.boxplot([vals[j]], positions=[p], widths=w, patch_artist=True, showfliers=tipo == "box",
                             **({"orientation": "horizontal"} if H else {}), manage_ticks=False,
-                            medianprops=dict(color=t["fonte.cor"] if tipo == "box" else cor, lw=1.0),
+                            medianprops=dict(color=t["fonte.cor"] if tipo != "raincloud" else cor, lw=1.0),
                             whiskerprops=dict(color=cor, lw=t["erro.esp"]), capprops=dict(color=cor, lw=t["erro.esp"]),
                             boxprops=dict(lw=t["medias.contorno_esp"] or 0.6, edgecolor=cor),
                             flierprops=dict(marker="o", ms=2.5, mfc=cor, mec="none", alpha=0.6))
             for b in bp["boxes"]:
-                b.set_facecolor(to_rgba(cor, 0.25 * t["medias.barra_alfa"]) if tipo == "box" else "white")
+                b.set_facecolor(to_rgba(cor, 0.25 * t["medias.barra_alfa"]) if tipo != "raincloud" else "white")
                 b.set_hatch(hach)
-        if tipo in ("violino", "raincloud") and len(vals[j]) >= 3:
-            _violino(ax, pos[j] + (0.05 if tipo == "raincloud" else 0), vals[j], larg * (0.9 if tipo == "raincloud" else 1),
-                     cor, 0.30 * t["medias.barra_alfa"], t["medias.contorno_esp"] or 0.5, tipo == "raincloud", H)
+        if tipo in ("violino", "raincloud", "meio-violino") and len(vals[j]) >= 3:
+            meio = tipo in ("raincloud", "meio-violino")
+            _violino(ax, pos[j] + (0.05 if tipo == "raincloud" else 0.02 if tipo == "meio-violino" else 0), vals[j],
+                     larg * (0.9 if meio else 1), cor, 0.30 * t["medias.barra_alfa"], t["medias.contorno_esp"] or 0.5,
+                     meio, H)
     # observações
     topo_obs = np.full(k, -np.inf)
     base_obs = np.full(k, np.inf)
@@ -493,7 +573,7 @@ def desenhar_medias(ax, sp: SpecMedias, t, idioma="pt", legenda=True):
             cor = _cor_obs(t, cores[j])
             if tipo == "beeswarm":
                 off = _swarm(v, t["medias.obs_tam"], ax, H)
-            elif tipo == "raincloud":
+            elif tipo in ("raincloud", "meia-caixa", "meio-violino"):
                 off = _jitter(len(v), min(t["medias.obs_disp"], 0.08), j)
             else:
                 off = _jitter(len(v), t["medias.obs_disp"], j)
@@ -501,7 +581,7 @@ def desenhar_medias(ax, sp: SpecMedias, t, idioma="pt", legenda=True):
     # médias e erros
     for j in range(k):
         cor = cores[j]
-        mostra_ponto = tipo in ("pontos", "violino", "beeswarm", "raincloud")
+        mostra_ponto = tipo in ("pontos", "violino", "beeswarm", "raincloud", "meio-violino")
         if tipo == "raincloud":
             ax.plot(*((med[j], pos[j]) if H else (pos[j], med[j])), marker="o", ms=ms * 0.8, color=cor,
                     mec="white", mew=0.5, zorder=5)
@@ -511,10 +591,9 @@ def desenhar_medias(ax, sp: SpecMedias, t, idioma="pt", legenda=True):
                   ms=ms, elinewidth=t["erro.esp"], capthick=t["erro.esp"], capsize=t["erro.chapeu"], zorder=4,
                   mfc=("white" if t["series.vazados"] else cor), mec=(cor if t["series.vazados"] else t["series.marcador_borda_cor"]),
                   mew=(t["series.marcador_borda"] if not t["series.vazados"] else max(t["series.marcador_borda"], 0.8)))
-        if tipo in ("box",):
-            if t["erro.tipo"] != "nenhuma":
-                pass
-            ax.plot(*((med[j], pos[j]) if H else (pos[j], med[j])), marker="D", ms=ms * 0.7, color="white",
+        if tipo in ("box", "meia-caixa"):
+            pb = pos[j] + (dx_med if tipo == "meia-caixa" else 0)
+            ax.plot(*((med[j], pb) if H else (pb, med[j])), marker="D", ms=ms * 0.7, color="white",
                     mec=cor, mew=0.8, zorder=5)
             continue
         p = pos[j] + dx_med
@@ -522,10 +601,14 @@ def desenhar_medias(ax, sp: SpecMedias, t, idioma="pt", legenda=True):
             ax.errorbar(med[j], p, xerr=ye if t["erro.tipo"] != "nenhuma" else None, **kw)
         else:
             ax.errorbar(p, med[j], yerr=ye if t["erro.tipo"] != "nenhuma" else None, **kw)
+    if tipo_lin and k > 1:
+        cor_l = cores[0] if not t["series.colorir_niveis"] else t["series.cor_unica"]
+        xs_l = pos + dx_med
+        ax.plot(*((med, xs_l) if H else (xs_l, med)), color=cor_l, lw=t["series.linha_esp"], zorder=3)
     # limites
     topo = med + np.nan_to_num(err)
     base = med - (0 if t["erro.so_superior"] else np.nan_to_num(err))
-    if tipo in ("box", "violino", "raincloud", "beeswarm") or mostrar_obs:
+    if tipo in ("box", "violino", "raincloud", "beeswarm", "meia-caixa", "meio-violino") or mostrar_obs:
         topo = np.maximum(topo, np.where(np.isfinite(topo_obs), topo_obs, topo))
         base = np.minimum(base, np.where(np.isfinite(base_obs), base_obs, base))
     lo, hi = float(np.nanmin(base)), float(np.nanmax(topo))
@@ -540,9 +623,12 @@ def desenhar_medias(ax, sp: SpecMedias, t, idioma="pt", legenda=True):
         alvo = {"acima dos dados": topo, "acima do erro": med + np.nan_to_num(err),
                 "topo alinhado": np.full(k, hi)}[t["letras.posicao"]]
         for j, i in enumerate(ii):
-            xl = pos[j] + (dx_med if tipo == "pontos" else 0)
+            xl = pos[j] + (dx_med if tipo in ("pontos", "meia-caixa", "meio-violino", "beeswarm") else 0)
             _texto_letra(t, ax, xl, alvo[j] + d, letras[i], H)
     colchetes = _colchetes(ax, t, ordem, pos, hi + (0.10 * faixa if tem_letras else 0.02 * faixa), faixa, H)
+    if t["medias.rotulo_valor"]:
+        _rotulos_valor(ax, t, pos + (dx_med if tipo in ("pontos", "meia-caixa", "meio-violino", "beeswarm") else 0),
+                       med, err, tipo, H, idioma)
     folga = (0.14 if tem_letras else 0.06) + 0.09 * colchetes
     if H:
         faixa_x = faixa
@@ -554,15 +640,15 @@ def desenhar_medias(ax, sp: SpecMedias, t, idioma="pt", legenda=True):
             xmax = float(t["eixos.y_max"])
         ax.set_xlim(xmin, xmax)
         ax.set_ylim(k - 0.5, -0.5)
-        ax.set_yticks(pos, _quebrar([tm.nome_nivel(t, o) for o in ordem], 22))
+        ax.set_yticks(pos, _quebrar([tm.nome_rico(t, o) for o in ordem], 22))
         ax.tick_params(axis="y", length=0)
     else:
         _limites_y(ax, t, lo, hi, folga, zero=zero)
         ax.set_xlim(-0.6, k - 0.4)
         larg_char = max(6, (_largura_ax_mm(ax) * 1.12 / max(k, 1)) / (0.165 * t["fonte.numeros"]))
-        nomes = [tm.nome_nivel(t, o) for o in ordem]
+        nomes = [tm.nome_rico(t, o) for o in ordem]
         _rotulos_categoricos(ax, pos, nomes, larg_char, t)
-    _anotacoes(ax, t)
+    _anotacoes(ax, t, float(np.nanmean(med)) if k else None, "x" if H else "y", idioma)
     estilizar_eixo(ax, t, idioma, x_categorico=not H, y_categorico=H)
     if H:
         ax.xaxis.set_major_formatter(_formatador(t, t["eixos.y_decimais"], idioma))
@@ -570,9 +656,14 @@ def desenhar_medias(ax, sp: SpecMedias, t, idioma="pt", legenda=True):
     else:
         _rotulos_eixos(ax, t, sp.rotulo_x, sp.rotulo_y)
     if t["series.colorir_niveis"] and legenda and t["legenda.posicao"] != "automática":
-        hs = [Patch(facecolor=cores[j], label=tm.nome_nivel(t, ordem[j])) for j in range(k)]
+        hs = [Patch(facecolor=cores[j], label=tm.nome_rico(t, ordem[j])) for j in range(k)]
         _legenda(ax, t, hs, [h.get_label() for h in hs], sp.rotulo_x)
     return ax
+
+
+def _escurecer(cor, f=0.38):
+    r, g, b, a = to_rgba(cor)
+    return (r * (1 - f), g * (1 - f), b * (1 - f), 1.0)
 
 
 def _violino(ax, c, v, larg, cor, alfa, lw, metade, H):
@@ -609,6 +700,49 @@ def _rotulos_categoricos(ax, pos, nomes, larg_char, t):
     else:
         ax.set_xticks(pos, quebrados)
     ax.tick_params(axis="x", length=0)
+    ax._nomes_categoricos = list(nomes)
+
+
+def _partir(n):
+    """Quebra um rótulo em duas linhas no espaço mais próximo do meio."""
+    n = str(n)
+    esp = [i for i, c in enumerate(n) if c == " " and "$" not in n[:i].replace("\\$", "")[-1:]]
+    if not esp:
+        return n
+    i = min(esp, key=lambda k: abs(k - len(n) / 2))
+    return n[:i] + "\n" + n[i + 1:]
+
+
+def _corrigir_sobreposicao(fig):
+    """Depois do layout final: se rótulos categóricos de X se sobrepõem, quebra em duas linhas; se ainda
+    assim não couberem, inclina 35° (a menos que o usuário tenha fixado a rotação)."""
+    eixos = [a for a in fig.axes if getattr(a, "_nomes_categoricos", None)]
+    if not eixos:
+        return
+    try:
+        fig.canvas.draw()
+    except Exception:
+        return
+    r = fig.canvas.get_renderer()
+
+    def sobrepoe(ax):
+        bbs = [lb.get_window_extent(r) for lb in ax.get_xticklabels() if lb.get_text()]
+        return any(bbs[i].x1 > bbs[i + 1].x0 - 1.5 for i in range(len(bbs) - 1))
+    mudou = False
+    for ax in eixos:
+        if ax.get_xticklabels() and ax.get_xticklabels()[0].get_rotation() != 0:
+            continue
+        if sobrepoe(ax):
+            nomes = ax._nomes_categoricos
+            meio = [_partir(n) for n in nomes]
+            ax.set_xticks(ax.get_xticks(), meio)
+            mudou = True
+    if mudou:
+        fig.canvas.draw()
+        for ax in eixos:
+            if ax.get_xticklabels() and ax.get_xticklabels()[0].get_rotation() == 0 and sobrepoe(ax):
+                ax.set_xticks(ax.get_xticks(), ax._nomes_categoricos)
+                plt.setp(ax.get_xticklabels(), rotation=35, ha="right", rotation_mode="anchor")
 
 
 def _largura_ax_mm(ax):
@@ -658,6 +792,26 @@ def _swarm(v, s_pt2, ax, H):
     return xs
 
 
+def _rotulos_valor(ax, t, pos, med, err, tipo, H, idioma):
+    """Rótulos de dados (valor da média): dentro da barra, perto do topo; nos demais tipos, ao lado do ponto."""
+    dec = int(t["medias.rotulo_decimais"])
+    for p, m, e in zip(pos, med, np.nan_to_num(err)):
+        if not np.isfinite(m):
+            continue
+        s = (_num(m, t, idioma, 3) if dec < 0 else f"{m:.{dec}f}".replace(".", _sep(t, idioma))).replace("-", "−")
+        kw = dict(fontsize=t["fonte.letras"] * 0.92, color=t["fonte.cor"], zorder=6, clip_on=True)
+        if tipo == "barras":
+            desc = 0 if t["erro.so_superior"] else e
+            if H:
+                ax.annotate(s, (m - desc, p), xytext=(-2, 0), textcoords="offset points", ha="right", va="center", **kw)
+            else:
+                ax.annotate(s, (p, m - desc), xytext=(0, -2), textcoords="offset points", ha="center", va="top", **kw)
+        elif H:
+            ax.text(m, p - 0.18, s, ha="center", va="bottom", **kw)
+        else:
+            ax.text(p + 0.09, m, s, ha="left", va="center", **kw)
+
+
 def _colchetes(ax, t, ordem, pos, y0, faixa, H=False):
     itens = [c for c in (t["anot.colchetes"] or []) if str(c.get("de")) in ordem and str(c.get("ate")) in ordem]
     for n, c in enumerate(itens):
@@ -667,36 +821,87 @@ def _colchetes(ax, t, ordem, pos, y0, faixa, H=False):
         kw = dict(color=t["eixos.cor"], lw=t["eixos.espessura"], clip_on=False)
         if H:
             ax.plot([y, y + h, y + h, y], [a, a, b, b], **kw)
-            ax.text(y + h * 1.6, (a + b) / 2, c.get("texto", "*"), va="center", ha="left", fontsize=t["fonte.letras"])
+            ax.text(y + h * 1.6, (a + b) / 2, tm.rico(c.get("texto") or "*"), va="center", ha="left", fontsize=t["fonte.letras"])
         else:
             ax.plot([a, a, b, b], [y, y + h, y + h, y], **kw)
-            ax.text((a + b) / 2, y + h * 1.2, c.get("texto", "*"), ha="center", va="bottom", fontsize=t["fonte.letras"])
+            ax.text((a + b) / 2, y + h * 1.2, tm.rico(c.get("texto") or "*"), ha="center", va="bottom", fontsize=t["fonte.letras"])
     return len(itens)
 
 
-def _anotacoes(ax, t):
-    for l in t["anot.linhas"] or []:
+def _anotacoes(ax, t, media=None, eixo_media="y", idioma="pt"):
+    """Linhas de referência, faixas sombreadas, setas/formas e textos livres (coordenadas como no OriginPro:
+    linhas e faixas em unidades dos dados; formas e textos em fração do eixo, 0–1)."""
+    for f in t.get("anot.faixas") or []:
+        try:
+            a, b = float(f.get("de")), float(f.get("ate"))
+        except (TypeError, ValueError):
+            continue
+        cor = f.get("cor") or "#D9C9B6"
+        alfa = float(f.get("alfa") if f.get("alfa") not in (None, "") else 0.25)
+        if f.get("eixo", "y") == "y":
+            ax.axhspan(min(a, b), max(a, b), color=cor, alpha=alfa, lw=0, zorder=0)
+            if f.get("texto"):
+                ax.text(0.01, max(a, b), tm.rico(str(f["texto"])), transform=ax.get_yaxis_transform(), va="top",
+                        ha="left", fontsize=t["fonte.legenda"], color=t["fonte.cor"], alpha=0.85, clip_on=True)
+        else:
+            ax.axvspan(min(a, b), max(a, b), color=cor, alpha=alfa, lw=0, zorder=0)
+            if f.get("texto"):
+                ax.text((a + b) / 2, 0.99, tm.rico(str(f["texto"])), transform=ax.get_xaxis_transform(), va="top",
+                        ha="center", fontsize=t["fonte.legenda"], color=t["fonte.cor"], alpha=0.85, clip_on=True)
+    linhas = list(t["anot.linhas"] or [])
+    if t.get("eixos.linha_media") and media is not None and np.isfinite(media):
+        linhas.append({"eixo": eixo_media, "valor": media, "estilo": "tracejada", "cor": "#7A7A7A",
+                       "texto": "média" if idioma == "pt" else "mean"})
+    for l in linhas:
         try:
             v = float(l.get("valor"))
         except (TypeError, ValueError):
             continue
         ls = tm.ESTILOS_LINHA.get(l.get("estilo", "tracejada"), "--")
-        kw = dict(color=l.get("cor", "#7A7A7A"), lw=float(l.get("esp", 0.6)), ls=ls, zorder=1)
+        kw = dict(color=l.get("cor") or "#7A7A7A", lw=float(l.get("esp") or 0.6), ls=ls, zorder=1)
         if l.get("eixo", "y") == "y":
             ax.axhline(v, **kw)
             if l.get("texto"):
-                ax.text(1.0, v, " " + l["texto"], transform=ax.get_yaxis_transform(), va="center", ha="left",
-                        fontsize=t["fonte.legenda"], color=kw["color"], clip_on=False)
+                ax.text(1.0, v, " " + tm.rico(str(l["texto"])), transform=ax.get_yaxis_transform(), va="center",
+                        ha="left", fontsize=t["fonte.legenda"], color=kw["color"], clip_on=False)
         else:
             ax.axvline(v, **kw)
             if l.get("texto"):
-                ax.text(v, 1.0, l["texto"], transform=ax.get_xaxis_transform(), va="bottom", ha="center",
-                        fontsize=t["fonte.legenda"], color=kw["color"], clip_on=False)
+                ax.text(v, 1.0, tm.rico(str(l["texto"])), transform=ax.get_xaxis_transform(), va="bottom",
+                        ha="center", fontsize=t["fonte.legenda"], color=kw["color"], clip_on=False)
+    for fm in t.get("anot.formas") or []:
+        try:
+            x0, y0 = float(fm.get("x0")), float(fm.get("y0"))
+            x1, y1 = float(fm.get("x1")), float(fm.get("y1"))
+        except (TypeError, ValueError):
+            continue
+        cor = fm.get("cor") or t["eixos.cor"]
+        lw = float(fm.get("esp") or t["eixos.espessura"])
+        tipo = fm.get("tipo") or "seta"
+        if tipo in ("seta", "linha"):
+            ax.annotate(tm.rico(str(fm.get("texto") or "")), xy=(x1, y1), xytext=(x0, y0), xycoords="axes fraction",
+                        textcoords="axes fraction", fontsize=t["fonte.legenda"], color=t["fonte.cor"],
+                        ha="center", va="center", zorder=6,
+                        arrowprops=dict(arrowstyle="-|>,head_length=0.4,head_width=0.2" if tipo == "seta" else "-",
+                                        color=cor, lw=lw, shrinkA=2, shrinkB=0))
+        elif tipo in ("retângulo", "elipse"):
+            from matplotlib.patches import Ellipse as _El, Rectangle as _Re
+            if tipo == "retângulo":
+                patch = _Re((min(x0, x1), min(y0, y1)), abs(x1 - x0), abs(y1 - y0))
+            else:
+                patch = _El(((x0 + x1) / 2, (y0 + y1) / 2), abs(x1 - x0), abs(y1 - y0))
+            patch.set(transform=ax.transAxes, facecolor="none", edgecolor=cor, lw=lw, zorder=6, clip_on=False,
+                      ls=tm.ESTILOS_LINHA.get(fm.get("estilo") or "contínua", "-"))
+            ax.add_patch(patch)
+            if fm.get("texto"):
+                ax.text((x0 + x1) / 2, max(y0, y1) + 0.01, tm.rico(str(fm["texto"])), transform=ax.transAxes,
+                        ha="center", va="bottom", fontsize=t["fonte.legenda"], color=t["fonte.cor"])
     for tx in t["anot.textos"] or []:
         try:
-            ax.text(float(tx.get("x", 0.5)), float(tx.get("y", 0.95)), tx.get("texto", ""), transform=ax.transAxes,
-                    fontsize=float(tx.get("tam", t["fonte.tamanho"])), ha=tx.get("alinhar", "left"), va="top",
-                    color=tx.get("cor", t["fonte.cor"]), fontstyle="italic" if tx.get("italico") else "normal")
+            ax.text(float(tx.get("x", 0.5)), float(tx.get("y", 0.95)), tm.rico(str(tx.get("texto", ""))),
+                    transform=ax.transAxes, fontsize=float(tx.get("tam") or t["fonte.tamanho"]),
+                    ha=tx.get("alinhar", "left"), va="top", color=tx.get("cor") or t["fonte.cor"],
+                    fontstyle="italic" if tx.get("italico") else "normal")
         except (TypeError, ValueError):
             continue
 
@@ -708,7 +913,10 @@ def desenhar_grupos(ax, sp: SpecGrupos, t, idioma="pt", legenda=True):
     A = _ordem(sp.A, t)
     B = [b for b in _ordem(sp.B, t)]
     ka, kb = len(A), len(B)
-    tipo = t["medias.tipo"] if t["medias.tipo"] in ("pontos", "barras", "box") else "pontos"
+    tipo = t["medias.tipo"] if t["medias.tipo"] in ("pontos", "barras", "box", "linhas") else "pontos"
+    conectar = t["medias.conectar"] or tipo == "linhas"
+    if tipo == "linhas":
+        tipo = "pontos"
     larg = min(t["medias.espaco_grupos"] / max(kb, 1), 0.32)
     ms = t["series.marcador_tam"]
     topo_g, base_g = -np.inf, np.inf
@@ -727,9 +935,12 @@ def desenhar_grupos(ax, sp: SpecGrupos, t, idioma="pt", legenda=True):
         base = m - (0 if t["erro.so_superior"] else e)
         hach = tm.HACHURAS[j % len(tm.HACHURAS)] if t["medias.hachuras"] else ""
         if tipo == "barras":
+            auto = t["medias.contorno_auto"]
             ax.bar(x, m, width=larg * 0.92, color=to_rgba(cor, 0.3 * t["medias.barra_alfa"] if not t["medias.hachuras"] else 0.15),
-                   edgecolor=t["medias.contorno_cor"] if t["medias.contorno_esp"] else "none",
-                   linewidth=t["medias.contorno_esp"], hatch=hach, zorder=1)
+                   edgecolor=_escurecer(cor) if auto else (t["medias.contorno_cor"] if t["medias.contorno_esp"] else "none"),
+                   linewidth=t["medias.contorno_esp"] or (0.6 if auto else 0), hatch=hach, zorder=1)
+            if t["medias.rotulo_valor"]:
+                _rotulos_valor(ax, t, x, m, e, "barras", False, idioma)
         if t["medias.obs"] and sp.obs is not None:
             for i, a in enumerate(A):
                 v = sp.obs.loc[(sp.obs["A"].astype(str) == a) & (sp.obs["B"].astype(str) == b), "y"].to_numpy(float)
@@ -752,13 +963,13 @@ def desenhar_grupos(ax, sp: SpecGrupos, t, idioma="pt", legenda=True):
                         mfc="white" if t["series.vazados"] else cor,
                         mec=cor if t["series.vazados"] else t["series.marcador_borda_cor"],
                         mew=t["series.marcador_borda"] if not t["series.vazados"] else 0.8,
-                        ls=tm.linha_grupo(t, b, j) if t["medias.conectar"] else "none",
+                        ls=tm.linha_grupo(t, b, j) if conectar else "none",
                         lw=t["series.linha_esp"])
-        handles.append(Line2D([], [], color=cor, marker=mk, ms=ms * 0.9, lw=t["series.linha_esp"] if t["medias.conectar"] else 0,
-                              ls=tm.linha_grupo(t, b, j) if t["medias.conectar"] else "none", mfc="white" if t["series.vazados"] else cor,
+        handles.append(Line2D([], [], color=cor, marker=mk, ms=ms * 0.9, lw=t["series.linha_esp"] if conectar else 0,
+                              ls=tm.linha_grupo(t, b, j) if conectar else "none", mfc="white" if t["series.vazados"] else cor,
                               mec=cor if t["series.vazados"] else t["series.marcador_borda_cor"]) if tipo != "barras"
                        else Patch(facecolor=to_rgba(cor, 0.35), edgecolor=cor, hatch=hach, lw=0.5))
-        labels.append(tm.nome_nivel(t, b))
+        labels.append(tm.nome_rico(t, b))
         topo_g, base_g = max(topo_g, np.nanmax(topo)), min(base_g, np.nanmin(base))
         for i, a in enumerate(A):
             L = ""
@@ -778,9 +989,9 @@ def desenhar_grupos(ax, sp: SpecGrupos, t, idioma="pt", legenda=True):
                     rotation=90 if (len(L) > 3 and kb * ka > 16) else 0)
     _limites_y(ax, t, lo, topo_g, 0.16 if tem else 0.06, zero=tipo == "barras")
     larg_char = max(6, (_largura_ax_mm(ax) * 1.12 / max(ka, 1)) / (0.165 * t["fonte.numeros"]))
-    _rotulos_categoricos(ax, np.arange(ka), [tm.nome_nivel(t, a) for a in A], larg_char, t)
+    _rotulos_categoricos(ax, np.arange(ka), [tm.nome_rico(t, a) for a in A], larg_char, t)
     ax.set_xlim(-0.6, ka - 0.4)
-    _anotacoes(ax, t)
+    _anotacoes(ax, t, float(np.nanmean(sp.medias.to_numpy(float))), "y", idioma)
     estilizar_eixo(ax, t, idioma, x_categorico=True)
     _rotulos_eixos(ax, t, sp.nome_A, sp.rotulo_y)
     if legenda:
@@ -791,7 +1002,8 @@ def desenhar_grupos(ax, sp: SpecGrupos, t, idioma="pt", legenda=True):
 # ============================================================================
 # 3. Regressão
 # ============================================================================
-def _banda(mod, xx):
+def _banda(mod, xx, nivel=0.95, predicao=False, qm_erro=None):
+    """Meia-largura da faixa de confiança (curva média) ou de predição (nova observação), método delta."""
     if mod is None or getattr(mod, "cov", None) is None:
         return None
     th = np.asarray(mod.params, float)
@@ -803,8 +1015,12 @@ def _banda(mod, xx):
         tn[j] -= h
         G[:, j] = (_f_modelo(mod.codigo, xx, tp, mod.desloc_log) - _f_modelo(mod.codigo, xx, tn, mod.desloc_log)) / (2 * h)
     var = np.einsum("ij,jk,ik->i", G, mod.cov, G)
+    if predicao:
+        if qm_erro is None or not np.isfinite(qm_erro):
+            return None
+        var = var + qm_erro
     gl = mod.gl_erro if mod.gl_erro and np.isfinite(mod.gl_erro) else 30
-    return stats.t.ppf(0.975, gl) * np.sqrt(np.clip(var, 0, None))
+    return stats.t.ppf(1 - (1 - nivel) / 2, gl) * np.sqrt(np.clip(var, 0, None))
 
 
 def _texto_modelo(mod, t, idioma):
@@ -853,9 +1069,16 @@ def desenhar_regressao(ax, sp: SpecRegressao, t, idioma="pt", legenda=True):
         if c.sig and mod is not None:
             yy = mod.prever(xx)
             if t["reg.banda"]:
-                b = _banda(mod, xx)
-                if b is not None:
-                    ax.fill_between(xx, yy - b, yy + b, color=cor, alpha=t["reg.banda_alfa"], lw=0, zorder=1)
+                nivel = float(str(t["reg.banda_nivel"]).rstrip("%")) / 100
+                if t["reg.banda_tipo"] in ("predição", "ambas"):
+                    bp = _banda(mod, xx, nivel, True, c.qm_erro)
+                    if bp is not None:
+                        ax.fill_between(xx, yy - bp, yy + bp, color=cor, alpha=t["reg.banda_alfa"] * 0.55, lw=0, zorder=1)
+                        ys_all += [yy - bp, yy + bp]
+                if t["reg.banda_tipo"] in ("confiança", "ambas"):
+                    b = _banda(mod, xx, nivel)
+                    if b is not None:
+                        ax.fill_between(xx, yy - b, yy + b, color=cor, alpha=t["reg.banda_alfa"], lw=0, zorder=1)
             ax.plot(xx, yy, color=cor, lw=t["reg.esp"], ls=ls, zorder=3)
             if t["reg.marcar_ponto"]:
                 xp = next((v for k_, v in mod.pontos.items() if isinstance(v, (int, float)) and k_.startswith("x ")), None)
@@ -878,6 +1101,14 @@ def desenhar_regressao(ax, sp: SpecRegressao, t, idioma="pt", legenda=True):
     ax.set_xticks(np.unique(xs)) if not t["eixos.x_passo"] else None
     xmin = t["eixos.x_min"] if t["eixos.x_min"] is not None else xs.min() - 0.06 * xr
     xmax = t["eixos.x_max"] if t["eixos.x_max"] is not None else xs.max() + 0.06 * xr
+    esc_x = _escala(t, "x")
+    if esc_x == "raiz quadrada":
+        xmin = max(xmin, 0.0)
+    elif esc_x != "linear":
+        pos_x = xs[xs > 0]
+        xmin = xmin if xmin > 0 else (pos_x.min() / 1.6 if len(pos_x) else 0.1)
+        xmax = xmax * 1.25 if t["eixos.x_max"] is None else xmax
+        ax.set_xticks([v for v in np.unique(xs) if v > 0]) if not t["eixos.x_passo"] else None
     ax.set_xlim(xmin, xmax)
     pos = t["reg.posicao"]
     mostrar_txt = t["reg.equacao"] or t["reg.r2"]
@@ -908,7 +1139,7 @@ def desenhar_regressao(ax, sp: SpecRegressao, t, idioma="pt", legenda=True):
             chars = int(_largura_ax_mm(ax) / (0.19 * t["fonte.equacao"]))
             labs = []
             for r, tx, *_ in textos:
-                s = f"{tm.nome_nivel(t, r)}: " + "; ".join(tx)
+                s = f"{tm.nome_rico(t, r)}: " + "; ".join(tx)
                 labs.append("\n".join(textwrap.wrap(s, max(chars - 8, 20), break_long_words=False)))
             mapa_pos = {"abaixo do gráfico": "fora — abaixo", "sup. esquerda": "dentro — sup. esquerda",
                         "sup. direita": "dentro — sup. direita", "inf. esquerda": "dentro — inf. esquerda",
@@ -922,9 +1153,12 @@ def desenhar_regressao(ax, sp: SpecRegressao, t, idioma="pt", legenda=True):
             if leg is not None and tt["legenda.posicao"] == "fora — abaixo":
                 leg.set_bbox_to_anchor((-0.02 + t["legenda.dx"], -0.13 - 0.02 * t["fonte.titulo_eixo"] / 7 + t["legenda.dy"]))
     elif multi and legenda:
-        _legenda(ax, t, handles, [tm.nome_nivel(t, r) for r, *_ in textos], sp.titulo_legenda, "dentro — inf. direita")
-    _anotacoes(ax, t)
+        _legenda(ax, t, handles, [tm.nome_rico(t, r) for r, *_ in textos], sp.titulo_legenda, "dentro — inf. direita")
+    _anotacoes(ax, t, float(np.nanmean(np.concatenate([c.medias for c in curvas]))), "y", idioma)
     estilizar_eixo(ax, t, idioma)
+    if _escala(t, "x") not in ("linear", "ln") and not t["eixos.x_passo"]:
+        ax.set_xticks([v for v in np.unique(xs) if v > 0 or _escala(t, "x") == "raiz quadrada"])
+        ax.set_xlim(xmin, xmax)
     _rotulos_eixos(ax, t, sp.rotulo_x, sp.rotulo_y)
     return ax
 
@@ -964,8 +1198,8 @@ def desenhar_perfil(ax, sp: SpecPerfil, t, idioma="pt", legenda=True):
                     mec=cor if t["series.vazados"] else t["series.marcador_borda_cor"], mew=t["series.marcador_borda"])
         handles.append(Line2D([], [], color=cor, marker=mk, ms=ms * 0.9, lw=t["series.linha_esp"], ls=ls,
                               mec=t["series.marcador_borda_cor"]))
-        labels.append(tm.nome_nivel(t, s.get("rotulo")))
-    ax.set_yticks(pos, [tm.nome_nivel(t, c) for c in camadas])
+        labels.append(tm.nome_rico(t, s.get("rotulo")))
+    ax.set_yticks(pos, [tm.nome_rico(t, c) for c in camadas])
     ax.set_ylim(kc - 0.6, -0.4)
     if t["eixos.x_min"] is not None or t["eixos.x_max"] is not None:
         a, b = ax.get_xlim()
@@ -976,7 +1210,7 @@ def desenhar_perfil(ax, sp: SpecPerfil, t, idioma="pt", legenda=True):
     ax.xaxis.set_ticks_position("top")
     ax.xaxis.set_label_position("top")
     _rotulos_eixos(ax, t, sp.rotulo_valor, sp.rotulo_camada)
-    _anotacoes(ax, t)
+    _anotacoes(ax, t, float(np.nanmean(np.concatenate([np.asarray(s_["medias"], float) for s_ in series]))), "x", idioma)
     if multi and legenda:
         _legenda(ax, t, handles, labels, sp.titulo_legenda, "fora — abaixo")
         leg = ax.get_legend()
@@ -1014,7 +1248,7 @@ def desenhar_correlacao(ax, sp: SpecCorrelacao, t, idioma="pt", legenda=True):
                 if est:
                     ax.text(j, i + (0.25 if t["cor.valores"] else 0), est, ha="center", va="center", color=cor_txt,
                             fontsize=fs - 0.5)
-    nomes = [tm.nome_nivel(t, n) for n in sp.nomes]
+    nomes = [tm.nome_rico(t, n) for n in sp.nomes]
     if completa:
         ax.set_xlim(-0.5, k - 0.5)
         ax.set_ylim(k - 0.5, -0.5)
@@ -1061,7 +1295,7 @@ def desenhar_pca(ax, sp: SpecPCA, t, idioma="pt", legenda=True):
         sel = grupos == g
         cor, mk = tm.cor_grupo(t, g, j), tm.marcador_grupo(t, g, j)
         ax.scatter(E[sel, 0], E[sel, 1], s=t["pca.tam_pontos"], color=cor, alpha=max(t["medias.obs_alfa"], 0.6), lw=0,
-                   marker=mk, label=tm.nome_nivel(t, g), zorder=3)
+                   marker=mk, label=tm.nome_rico(t, g), zorder=3)
         if eli and sel.sum() >= 3:
             _elipse(ax, E[sel], cor)
     pos_txt = []
@@ -1075,7 +1309,7 @@ def desenhar_pca(ax, sp: SpecPCA, t, idioma="pt", legenda=True):
             pos_txt.append([x * 1.1, y * 1.1])
         pos_txt = _repelir(np.array(pos_txt), np.abs(E).max() * 0.07)
         for (x, y), nm, c in zip(pos_txt, sp.nomes, C):
-            ax.text(x, y, tm.nome_nivel(t, nm), fontsize=t["fonte.legenda"], color=t["pca.setas_cor"],
+            ax.text(x, y, tm.nome_rico(t, nm), fontsize=t["fonte.legenda"], color=t["pca.setas_cor"],
                     ha="left" if c[0] >= 0 else "right", va="center", zorder=5)
     if sp.rotulos_pontos is not None:
         for (x, y), r in zip(E, sp.rotulos_pontos):
@@ -1194,14 +1428,14 @@ def figura_diagnostico(sp: SpecDiagnostico, t, idioma="pt"):
 # ============================================================================
 def desenhar_dendrograma(ax, sp, t, idioma="pt", legenda=True):
     from scipy.cluster import hierarchy as h
-    D = h.dendrogram(sp.ligacao, labels=[tm.nome_nivel(t, r) for r in sp.rotulos], no_plot=True,
+    D = h.dendrogram(sp.ligacao, labels=[tm.nome_rico(t, r) for r in sp.rotulos], no_plot=True,
                      orientation="right")
     grupos_obs = sp.clusters
     folhas = D["ivl"]
     # cor de cada folha pelo grupo (critério de Mojena)
     cor_folha = {}
     if grupos_obs is not None:
-        nomes = [tm.nome_nivel(t, r) for r in sp.rotulos]
+        nomes = [tm.nome_rico(t, r) for r in sp.rotulos]
         for nome, g in zip(nomes, grupos_obs):
             cor_folha[nome] = tm.cor_grupo(t, f"Grupo {int(g)}", int(g) - 1)
     lw = t["series.linha_esp"]
@@ -1260,7 +1494,9 @@ def figura(sp, t, idioma="pt"):
             fig, ax = plt.subplots(figsize=(W * MM, H * MM), layout="constrained")
             DESENHAR[sp.tipo](ax, sp, t, idioma)
             if t["tela.titulo"]:
-                ax.set_title(t["tela.titulo"], loc="left", fontsize=t["fonte.tamanho"], fontweight=t["fonte.peso_titulos"])
+                ax.set_title(tm.rico(t["tela.titulo"]), loc="left", fontsize=t["fonte.tamanho"], fontweight=t["fonte.peso_titulos"])
+            if not t["eixos.x_rotacao"]:
+                _corrigir_sobreposicao(fig)
         else:
             fig = _figura_quebrada(sp, t, idioma, W, H)
     return fig
@@ -1297,8 +1533,31 @@ def _figura_quebrada(sp, t, idioma, W, H):
     return fig
 
 
+COM_Y_NUMERICO = ("medias", "grupos", "regressao")
+
+
+def _y_comum(itens, idioma):
+    """Faixa de Y que contém todos os painéis (desenho prévio de cada um, como o Merge Graphs do Origin)."""
+    lo, hi = np.inf, -np.inf
+    for sp, t in itens:
+        if sp is None or sp.tipo not in COM_Y_NUMERICO or (sp.tipo == "medias" and t["medias.horizontal"]):
+            continue
+        with plt.rc_context(rc(t)):
+            f, a = plt.subplots(figsize=(t["tela.largura_mm"] * MM, _altura_padrao(sp, t) * MM))
+            DESENHAR[sp.tipo](a, sp, t, idioma, legenda=False)
+            y0, y1 = a.get_ylim()
+            plt.close(f)
+        lo, hi = min(lo, y0), max(hi, y1)
+    return (lo, hi) if np.isfinite(lo) and np.isfinite(hi) else None
+
+
 def painel(itens, linhas, colunas, t_painel, idioma="pt", largura_mm=None, altura_mm=None, ordem_rotulos=True):
     """itens: lista de (spec, tema). Monta grade linhas × colunas (itens a mais são ignorados)."""
+    itens = list(itens[: linhas * colunas])
+    comum = _y_comum(itens, idioma) if t_painel.get("painel.mesma_escala_y") else None
+    if comum:
+        itens = [(sp, {**t, "eixos.y_min": comum[0], "eixos.y_max": comum[1]}) if sp is not None
+                 and sp.tipo in COM_Y_NUMERICO else (sp, t) for sp, t in itens]
     W = largura_mm or t_painel["tela.largura_mm"]
     H = altura_mm or (W / colunas * 0.85 * linhas)
     with plt.rc_context(rc(t_painel)):
@@ -1306,7 +1565,7 @@ def painel(itens, linhas, colunas, t_painel, idioma="pt", largura_mm=None, altur
         gs = fig.add_gridspec(linhas, colunas, wspace=t_painel["painel.wspace"] * 0.1,
                               hspace=t_painel["painel.hspace"] * 0.1)
         fig.get_layout_engine().set(wspace=t_painel["painel.wspace"] * 0.1, hspace=t_painel["painel.hspace"] * 0.1)
-    for k, (sp, t) in enumerate(itens[: linhas * colunas]):
+    for k, (sp, t) in enumerate(itens):
         if sp is None:
             continue
         r_, c_ = divmod(k, colunas)
@@ -1318,11 +1577,16 @@ def painel(itens, linhas, colunas, t_painel, idioma="pt", largura_mm=None, altur
                 ax.axis("off")
                 continue
             DESENHAR[sp.tipo](ax, sp, t, idioma)
+            if comum and t_painel.get("painel.ocultar_internos") and c_ > 0 and sp.tipo in COM_Y_NUMERICO:
+                ax.set_ylabel("")
+                ax.tick_params(axis="y", labelleft=False)
             rot = tm.rotulo_painel(t_painel["painel.estilo"], k)
             if rot:
                 ax.text(t_painel["painel.dx"] - 0.12, t_painel["painel.dy"], rot, transform=ax.transAxes,
                         fontsize=t_painel["painel.tamanho"], fontweight=t_painel["painel.peso"], ha="left", va="bottom",
                         family=familia(t_painel))
+    with plt.rc_context(rc(t_painel)):
+        _corrigir_sobreposicao(fig)
     return fig
 
 
@@ -1330,18 +1594,36 @@ def painel(itens, linhas, colunas, t_painel, idioma="pt", largura_mm=None, altur
 # Exportação
 # ============================================================================
 def exportar(fig, t, formatos=("png", "svg", "pdf", "tiff")) -> dict:
+    """PNG/TIFF na resolução do tema (TIFF com LZW, RGB ou CMYK); SVG/EPS com texto editável ou em
+    contornos; PDF com fontes TrueType embutidas."""
     out = {}
     transp = bool(t["tela.transparente"])
+    contornos = t.get("tela.svg_texto") == "contornos"
     for fmt in formatos:
         buf = io.BytesIO()
-        kw = dict(format=fmt, transparent=transp, facecolor="none" if transp else t["tela.fundo"])
+        kw = dict(format=fmt, transparent=transp and fmt != "eps", facecolor="none" if (transp and fmt != "eps")
+                  else t["tela.fundo"])
         if fmt in ("png", "tiff"):
             kw["dpi"] = int(t["tela.dpi"])
-        if fmt == "tiff":
+        cmyk = fmt == "tiff" and t.get("tela.tiff_cor") == "CMYK"
+        if fmt == "tiff" and not cmyk:
             kw["pil_kwargs"] = {"compression": "tiff_lzw"}
-        with plt.rc_context({"svg.fonttype": "none", "pdf.fonttype": 42}):
+        if cmyk:
+            kw["format"] = "png"
+            kw["transparent"] = False
+            kw["facecolor"] = t["tela.fundo"]
+        with plt.rc_context({"svg.fonttype": "path" if contornos else "none", "pdf.fonttype": 42,
+                             "ps.fonttype": 42, "ps.useafm": False}):
             fig.savefig(buf, **kw)
-        out[fmt] = buf.getvalue()
+        dados = buf.getvalue()
+        if cmyk:
+            from PIL import Image
+            im = Image.open(io.BytesIO(dados)).convert("RGB").convert("CMYK")
+            b2 = io.BytesIO()
+            dpi = int(t["tela.dpi"])
+            im.save(b2, format="TIFF", compression="tiff_lzw", dpi=(dpi, dpi))
+            dados = b2.getvalue()
+        out[fmt] = dados
     return out
 
 

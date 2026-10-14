@@ -232,7 +232,7 @@ def gerar_excel(resultados, opcoes, idioma="pt", extras=None, dados_brutos=None,
     t = T[idioma]
     buf = io.BytesIO()
     wb = xlsxwriter.Workbook(buf, {"in_memory": True, "nan_inf_to_errors": True})
-    wb.set_properties({"title": t["titulo"], "comments": "Gerado pela plataforma de análise de experimentos"})
+    wb.set_properties({"title": t["titulo"], "comments": "Gerado pela plataforma Stat-Soil", "company": "Stat-Soil"})
     ok = [r for r in resultados if not isinstance(r, Exception)]
     if not ok:
         wb.close()

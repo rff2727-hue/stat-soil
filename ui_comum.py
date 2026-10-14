@@ -16,9 +16,10 @@ from motor import exportar, figuras as fg, relatorio, tabelas, tema as tm
 ss = st.session_state
 
 MIMES = {"png": "image/png", "svg": "image/svg+xml", "pdf": "application/pdf", "tiff": "image/tiff",
+         "eps": "application/postscript",
          "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
          "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
-ROT_FMT = {"png": "PNG", "svg": "SVG", "pdf": "PDF", "tiff": "TIFF"}
+ROT_FMT = {"png": "PNG", "svg": "SVG", "pdf": "PDF", "tiff": "TIFF", "eps": "EPS"}
 
 
 def iniciar_estado():

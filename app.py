@@ -1,5 +1,5 @@
 """
-Estatística Experimental — plataforma de análise de experimentos agronômicos.
+Stat-Soil — plataforma de análise estatística de experimentos agronômicos.
 Python + motor determinístico + Streamlit; entrada e saída em Excel.
 """
 from __future__ import annotations
@@ -20,109 +20,26 @@ from motor.exemplos import exemplo_para
 from motor.modelo import (BASES, ESTRUTURAS, ErroDelineamento, Especificacao, Fator, TRANSFORMACOES,
                           rotulo_transformacao, sugerir_colunas)
 from motor.regressao import CATALOGO, FAMILIAS, modelos_da_familia
+import estilo
 import ui_analises as ua
 import ui_estudio
 from ui_comum import (botoes_figura, catalogo, fmt_tabela, iniciar_estado, nova_versao, previa, rotulo_item, ss,
                       tabela_ui, tema_base)
 
 RAIZ = Path(__file__).resolve().parent
-st.set_page_config(page_title="Estatística Experimental", page_icon=str(RAIZ / "assets" / "icone.png")
+st.set_page_config(page_title="Stat-Soil", page_icon=str(RAIZ / "assets" / "icone.png")
                    if (RAIZ / "assets" / "icone.png").exists() else None, layout="wide")
 
 # ============================================================================
 # Identidade visual
 # ============================================================================
-CSS = """
-<style>
-:root { --fundo:#2B2925; --topo:#23211E; --painel:#33302B; --borda:#4A463F; --texto:#EFE8D8; --mudo:#A89F8F;
-  --ambar:#F2A33A; --verde:#9AD48A; --sombra:#1A1816; }
-.mono, .marca, .marca-sub, .rotulo-mono, .leitura-rot, .leitura-val, .leitura-sub, .secao-tit {
-  font-family: 'JetBrains Mono', ui-monospace, monospace !important; }
-.marca { font-weight: 700; font-size: 26px; letter-spacing: 0.14em; color: var(--ambar); line-height: 1.1; }
-.marca-sub { font-size: 12px; color: var(--mudo); margin-top: 6px; letter-spacing: 0.04em; }
-.faixa { display: flex; flex-direction: column; gap: 3px; margin: 14px 0 20px 0; }
-.faixa div { height: 5px; }
-h1, h2, h3, h4 { letter-spacing: 0.06em; }
-h4 { font-size: 1.0rem !important; text-transform: uppercase; }
-strong, b { font-weight: 600; }
-.secao-tit { font-size: 14px; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; margin: 10px 0 6px 0;
-  color: var(--texto); }
-.secao-tit span { color: var(--ambar); }
-/* botões */
-button[data-testid="stBaseButton-primary"] { background: var(--ambar) !important; color: #23211E !important;
-  border: 2px solid var(--sombra) !important; box-shadow: 4px 4px 0 var(--sombra); min-height: 46px;
-  font-family: 'JetBrains Mono', monospace !important; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
-button[data-testid="stBaseButton-primary"] p { font-weight: 700; }
-button[data-testid="stBaseButton-primary"]:hover { background: #FFB54D !important; }
-button[data-testid="stBaseButton-primary"]:active { transform: translate(2px, 2px); box-shadow: 2px 2px 0 var(--sombra); }
-button[data-testid="stBaseButton-secondary"] { border: 2px solid var(--borda) !important; background: transparent !important;
-  font-family: 'JetBrains Mono', monospace !important; letter-spacing: 0.01em; min-height: 40px; }
-button[data-testid="stBaseButton-secondary"] p, button[data-testid="stBaseButton-primary"] p { font-size: 13px;
-  white-space: normal; line-height: 1.25; }
-button[data-testid="stBaseButton-secondary"]:hover { border-color: var(--ambar) !important; color: var(--ambar) !important; }
-div[data-testid="stDownloadButton"] button { min-width: 96px; }
-/* abas */
-div[role="tablist"] { gap: 6px; flex-wrap: wrap; border-bottom: none !important; }
-div[data-testid="stTab"] { border: 2px solid var(--borda); padding: 7px 14px !important; margin: 0 !important; }
-div[data-testid="stTab"] p { font-family: 'JetBrains Mono', monospace !important; font-size: 13px !important;
-  text-transform: uppercase; letter-spacing: 0.08em; }
-div[data-testid="stTab"]:hover { border-color: var(--ambar); }
-div[data-testid="stTab"][aria-selected="true"] { background: var(--ambar); border-color: var(--ambar); }
-div[data-testid="stTab"][aria-selected="true"] p { color: #23211E !important; font-weight: 700; }
-div[data-testid="stTab"]::after, div[data-testid="stTab"]::before { display: none !important; }
-/* sub-abas (dentro do conteúdo): mais discretas */
-div[data-testid="stTabs"] div[data-testid="stTabs"] div[data-testid="stTab"] { border-width: 1px; padding: 5px 11px !important; }
-div[data-testid="stTabs"] div[data-testid="stTabs"] div[data-testid="stTab"] p { font-size: 12px !important; }
-/* mostradores numéricos */
-.leitura { background: var(--painel); border: 2px solid var(--borda); padding: 14px 16px 12px 16px; display: flex;
-  flex-direction: column; gap: 6px; min-height: 104px; }
-.leitura-rot { font-size: 11px; letter-spacing: 0.14em; color: var(--mudo); text-transform: uppercase; }
-.leitura-val { font-size: 34px; line-height: 1.05; color: var(--ambar); white-space: nowrap; overflow: hidden;
-  text-overflow: ellipsis; }
-.leitura-sub { font-size: 12px; color: var(--mudo); }
-.leitura.ok .leitura-val, .leitura.ok .leitura-sub { color: var(--verde); }
-.leitura.alerta .leitura-val, .leitura.alerta .leitura-sub { color: #E07B2E; }
-/* figuras em cartão branco */
-div[data-testid="stImage"] img { background: #FFFFFF; padding: 10px; border: 2px solid var(--borda); }
-.rotulo-mono { font-size: 0.72rem; letter-spacing: 0.12em; color: var(--mudo); margin: 0.6rem 0 0.35rem 0; }
-.rotulo-mono span { color: var(--ambar); }
-/* expansores e painéis */
-div[data-testid="stExpander"] details { border: 2px solid var(--borda) !important; background: var(--painel); }
-div[data-testid="stExpander"] summary p { font-family: 'JetBrains Mono', monospace; font-size: 13px; letter-spacing: 0.04em; }
-section[data-testid="stSidebar"] h3 { font-size: 12px !important; letter-spacing: 0.14em; color: var(--mudo);
-  text-transform: uppercase; margin-top: 0.6rem; }
-section[data-testid="stSidebar"] h3 span.n { color: var(--ambar); }
-/* esquema da planilha */
-.papel { display:inline-block; padding: 2px 8px; margin: 2px 4px 2px 0; font-size: 0.8rem; color: #23211E;
-  font-family: 'JetBrains Mono', monospace; }
-table.esquema { border-collapse: collapse; font-size: 0.82rem; margin: 0.4rem 0 0.6rem 0;
-  font-family: 'JetBrains Mono', monospace; }
-table.esquema th { font-weight: 500; padding: 4px 10px; color: #23211E; border-top: 2px solid var(--texto);
-  border-bottom: 1px solid var(--texto); }
-table.esquema td { padding: 3px 10px; color: var(--texto); }
-table.esquema tr:last-child td { border-bottom: 2px solid var(--texto); }
-[data-testid="stElementToolbar"] { display: none !important; }
-</style>
-"""
-st.markdown(CSS, unsafe_allow_html=True)
+estilo.aplicar()
 iniciar_estado()
-
-_logo = RAIZ / "assets" / "logo.png"
-_logo_html = ""
-if _logo.exists():
-    import base64
-    _logo_html = (f"<img src='data:image/png;base64,{base64.b64encode(_logo.read_bytes()).decode()}' "
-                  "style='height:44px;margin-right:16px;vertical-align:middle;background:#EFE8D8;padding:4px'>")
-st.html(f"""
-<div style="display:flex;align-items:center">{_logo_html}<div class="marca">ESTATÍSTICA·EXPERIMENTAL</div></div>
-<div class="marca-sub">v{__version__} / motor determinístico · ANOVA, pressupostos, médias, regressão, multivariada
- — tabelas e figuras prontas para publicação</div>
-<div class="faixa" aria-hidden="true"><div style="background:#C4502A"></div><div style="background:#E07B2E"></div>
-<div style="background:#F2A33A"></div><div style="background:#E8C547"></div></div>""")
+_topo = st.container()
 
 
 def titulo_secao(n, texto):
-    st.html(f"<div class='secao-tit'><span>{n:02d} /</span> {texto}</div>")
+    estilo.secao(texto)
 
 
 # ============================================================================
@@ -181,13 +98,14 @@ def abrir_projeto():
 
 
 with st.sidebar:
-    st.markdown("### <span class='n'>01 /</span> Delineamento", unsafe_allow_html=True)
+    estilo.logo_lateral()
+    estilo.dymo("Delineamento")
     base = st.radio("Casualização", list(BASES), index=1, format_func=lambda b: BASES[b], key="base")
     estruturas_validas = [e for e in ESTRUTURAS if not (base == "DQL" and e in ("subdividida", "subsubdividida", "faixas"))
                           and not (base == "DIC" and e == "faixas")]
     estrutura = st.selectbox("Estrutura dos tratamentos", estruturas_validas, format_func=lambda e: ESTRUTURAS[e],
                              key="estrutura")
-    st.markdown("### <span class='n'>02 /</span> Análise", unsafe_allow_html=True)
+    estilo.dymo("Análise")
     ss.setdefault("w_alfa", 0.05)
     alfa = st.select_slider("Nível de significância (α)", [0.01, 0.05, 0.10], key="w_alfa")
     metodo = st.selectbox("Teste de médias", list(METODOS), format_func=lambda m: METODOS[m], key="w_metodo")
@@ -214,14 +132,14 @@ with st.sidebar:
         ss.setdefault("w_com_ep", True)
         com_ep = st.toggle("Tabelas com média ± erro-padrão", key="w_com_ep")
         ss.perfil_auto = st.toggle("Gráfico em perfil para fatores de camada/profundidade", value=ss.get("perfil_auto", True))
-    st.markdown("### <span class='n'>03 /</span> Saídas", unsafe_allow_html=True)
+    estilo.dymo("Saídas")
     idioma = st.radio("Idioma", ["pt", "en"], horizontal=True, format_func=lambda s: {"pt": "Português", "en": "English"}[s])
     presets = list(tm.PRESETS)
     novo_p = st.selectbox("Tema das figuras", presets, index=presets.index(ss.tema_preset),
                           help="Ajuste fino de cada figura e painéis na aba Estúdio de figuras.")
     if novo_p != ss.tema_preset:
         ss.tema_preset = novo_p
-    st.markdown("### <span class='n'>04 /</span> Projeto", unsafe_allow_html=True)
+    estilo.dymo("Projeto", laranja=True)
     st.file_uploader("Abrir projeto (.estatexp)", type=["estatexp"], key="w_projeto", on_change=abrir_projeto,
                      help="Reabre dados, delineamento, opções, modelos escolhidos, exclusões e estilos das figuras. "
                           "Salve o projeto na aba Downloads.")
@@ -354,6 +272,11 @@ def filtrar_excluidas(d, chave):
     return d[~(d.index + 2).isin(exc)] if exc else d
 
 
+def escolher_modelo(sel, chave, wkey):
+    ss.modelo_escolhido.setdefault(sel, {})[chave] = ss[wkey]
+    nova_versao()
+
+
 def reanalisar(sel, transformacao=None, manter_transf=False):
     ce = ss.config_exec
     d = filtrar_excluidas(dict(ce["grupos"])[sel[0]], sel)
@@ -448,7 +371,9 @@ if aba_dados.open:
                 nova_versao()
         df = ss.df
         if df is None:
-            st.info("Envie sua planilha ou carregue o exemplo acima para começar.")
+            estilo.vazio("Nenhuma planilha carregada",
+                         "Envie sua planilha acima ou abra “Como organizar a planilha” e carregue o exemplo do "
+                         "delineamento escolhido na barra lateral.")
         else:
             st.caption(f"{str(ss.nome_arquivo).replace(':None', '')} — {len(df)} linhas × {df.shape[1]} colunas")
             st.dataframe(df.head(200), height=230, hide_index=True)
@@ -490,24 +415,32 @@ if aba_dados.open:
 # ============================================================================
 # Aba: Resultados
 # ============================================================================
-def mostrar_figuras(itens, chave):
-    for k, it in enumerate(itens):
-        st.html(f"<div class='rotulo-mono'><span>FIG. {k + 1:02d} /</span> {it.titulo.upper()}</div>")
-        ci, cb = st.columns([3, 1])
-        try:
-            ci.image(previa(it, idioma=idioma), width="content")
-        except Exception as e:
-            ci.error(f"Erro ao desenhar: {e}")
-        with cb:
-            st.button("Editar no Estúdio", key=f"ed_{chave}_{it.id}", on_click=ir_para_estudio, args=(it.id,),
-                      type="primary", width="stretch")
-            botoes_figura(it, idioma, chave, horizontal=False)
+def mostrar_figuras(itens, chave, colunas=2):
+    """Figuras em grade de cartões: legenda no estilo de periódico, prévia e uma fileira de ações."""
+    for i in range(0, len(itens), colunas):
+        cols = st.columns(colunas, gap="large")
+        for k, (c, it) in enumerate(zip(cols, itens[i:i + colunas])):
+            with c:
+                estilo.legenda_figura(i + k + 1, it.titulo)
+                try:
+                    st.image(previa(it, idioma=idioma), width="stretch")
+                except Exception as e:
+                    st.error(f"Erro ao desenhar: {e}")
+                b1, b2, b3 = st.columns([1.35, 1, 0.9])
+                b1.button("Editar no Estúdio", key=f"ed_{chave}_{it.id}", on_click=ir_para_estudio, args=(it.id,),
+                          type="primary", width="stretch")
+                with b2:
+                    ui_estudio.ajuste_rapido(it, idioma, chave)
+                with b3:
+                    with st.popover("Baixar", width="stretch"):
+                        botoes_figura(it, idioma, chave, formatos=("png", "tiff", "svg", "pdf", "eps"), horizontal=False)
 
 
 if aba_res.open:
     with aba_res:
         if not ss.resultados:
-            st.info("Execute a análise na aba Dados e modelo.")
+            estilo.vazio("Ainda não há resultados",
+                         "Na aba Dados e modelo, confira o mapeamento das colunas e pressione Executar análise.")
         else:
             chaves = list(ss.resultados)
             rotulo_ch = lambda k: k[1] + (f"  ·  {k[0]}" if k[0] else "")
@@ -525,27 +458,26 @@ if aba_res.open:
                 m1, m2, m3, m4 = st.columns(4)
                 un_y = ss.rotulos_y.get(sel[1], "")
                 with m1:
-                    ua.leitura("Média geral", exportar._fmt_str(res.media_geral, exportar._decimais(res.media_geral), "pt"),
+                    estilo.mostrador("Média geral", exportar._fmt_str(res.media_geral, exportar._decimais(res.media_geral), "pt"),
                                sel[1])
                 cvs = list(res.cv.items())
                 with m2:
-                    ua.leitura(cvs[0][0].replace(" [escala transformada]", "").replace(" (%)", ""),
+                    estilo.mostrador(cvs[0][0].replace(" [escala transformada]", "").replace(" (%)", ""),
                                exportar._fmt_str(cvs[0][1], 1, "pt") + "%",
                                "escala transformada" if res.transformacao else "coef. de variação")
                 with m3:
                     if len(cvs) > 1:
-                        ua.leitura(cvs[1][0].replace(" [escala transformada]", "").replace(" (%)", ""),
+                        estilo.mostrador(cvs[1][0].replace(" [escala transformada]", "").replace(" (%)", ""),
                                    exportar._fmt_str(cvs[1][1], 1, "pt") + "%", "coef. de variação")
                     else:
-                        ua.leitura("R² do modelo", exportar._fmt_str(res.r2, 3, "pt"), "ajuste da ANOVA")
+                        estilo.mostrador("R² do modelo", exportar._fmt_str(res.r2, 3, "pt"), "ajuste da ANOVA")
                 pr = res.pressupostos
                 testes_ok = [t.ok for t in pr.testes if t.ok is not None]
                 n_ok = sum(bool(t) for t in testes_ok)
                 with m4:
                     tudo = n_ok == len(testes_ok)
-                    st.html(f"<div class='leitura {'ok' if tudo else 'alerta'}'><div class='leitura-rot'>Pressupostos"
-                            f"</div><div class='leitura-val'>{n_ok}/{len(testes_ok)}</div><div class='leitura-sub'>"
-                            f"{'● atendidos' if tudo else '● ver aba Pressupostos'}</div></div>")
+                    estilo.mostrador("Pressupostos", f"{n_ok}/{len(testes_ok)}",
+                                     "testes atendidos" if tudo else "veja a aba Pressupostos", led="ok" if tudo else "alerta")
                 if ss.excluir.get(sel):
                     st.info(f"Análise sem as linhas {', '.join(map(str, sorted(ss.excluir[sel])))} da planilha "
                             "(exclusão feita na aba Pressupostos).")
@@ -686,13 +618,15 @@ if aba_res.open:
                         atual = ss.modelo_escolhido.get(sel, {}).get(chave_fatia(fa))
                         padrao = fa.regressao.melhor.codigo if fa.regressao.melhor else (opcoes_m[0] if opcoes_m else None)
                         if opcoes_m:
-                            esc = st.selectbox("Modelo usado nos gráficos e no texto", opcoes_m,
-                                               index=opcoes_m.index(atual or padrao) if (atual or padrao) in opcoes_m else 0,
-                                               format_func=lambda c: CATALOGO[c].nome, key=f"mod_{sel}_{chave_fatia(fa)}")
-                            if esc != (atual or padrao):
-                                ss.modelo_escolhido.setdefault(sel, {})[chave_fatia(fa)] = esc
-                                nova_versao()
-                                st.rerun()
+                            k_mod = f"mod_{sel}_{chave_fatia(fa)}"
+                            vigente = atual if atual in opcoes_m else (padrao if padrao in opcoes_m else opcoes_m[0])
+                            if ss.get(k_mod) != vigente:     # sincroniza com escolhas feitas no Estúdio
+                                ss[k_mod] = vigente
+                            esc = st.selectbox("Modelo usado nos gráficos, no texto, no Excel e no relatório", opcoes_m,
+                                               format_func=lambda c: CATALOGO[c].nome, key=k_mod,
+                                               on_change=escolher_modelo, args=(sel, chave_fatia(fa), k_mod),
+                                               help="Também pode ser trocado em “Ajuste rápido”, ao lado do gráfico, "
+                                                    "e no Estúdio (aba Regressão).")
                             m = [a for a in fa.regressao.ajustes if a.codigo == esc][0]
                             pts = {k: v for k, v in m.pontos.items() if not isinstance(v, bool)}
                             if pts:
@@ -772,7 +706,8 @@ if aba_est.open:
 if aba_multi.open:
     with aba_multi:
         if ss.df is None:
-            st.info("Carregue os dados primeiro.")
+            estilo.vazio("Sem dados", "Carregue uma planilha na aba Dados e modelo para calcular correlações, PCA, "
+                         "agrupamento e trilha.")
         else:
             df = ss.df
             numericas = [c for c in df.columns if pd.to_numeric(df[c], errors="coerce").notna().mean() > 0.8
@@ -839,7 +774,8 @@ if aba_plan.open:
 if aba_down.open:
     with aba_down:
         if not ss.resultados:
-            st.info("Execute a análise para gerar os arquivos.")
+            estilo.vazio("Nada para baixar ainda", "Execute a análise para gerar a planilha, o relatório, as figuras e o "
+                         "arquivo de projeto.")
         else:
             ce = ss.config_exec
             grupos_nomes = list(dict.fromkeys(k[0] for k in ss.resultados))
@@ -892,8 +828,9 @@ if aba_down.open:
 
             titulo_secao(3, "Pacote de figuras")
             st.caption("Cada figura sai com o tema global e os ajustes feitos no Estúdio.")
-            formatos = st.multiselect("Formatos", ["png", "svg", "pdf", "tiff"], default=["png", "svg"],
-                                      help="PNG e TIFF na resolução do tema; SVG com texto editável; PDF vetorial.")
+            formatos = st.multiselect("Formatos", ["png", "tiff", "svg", "pdf", "eps"], default=["png", "svg"],
+                                      help="PNG e TIFF na resolução do tema (TIFF com LZW, RGB ou CMYK); SVG e EPS com "
+                                           "texto editável ou em contornos; PDF vetorial com fontes embutidas.")
             incl_diag = st.toggle("Incluir gráficos de diagnóstico dos resíduos", value=False)
             if st.button("Gerar pacote (.zip)", key="gerar_zip"):
                 from ui_comum import tema_figura
@@ -967,13 +904,30 @@ if aba_guia.open:
   “não detectada ✓” (p alto) indica que a curva descreve bem as médias.
 
 #### Estúdio de figuras
-Cada figura pode ser ajustada em detalhe: tamanho em mm e resolução, 8 famílias de fonte e tamanhos por elemento,
-eixos (limites, intervalos, marcas, eixo quebrado, eixos destacados, separador decimal), cor/marcador/linha de cada
-grupo, nomes, ordem e ocultação de níveis, tipo de gráfico (pontos, barras, box, violino, raincloud, beeswarm),
-barras de erro (EP, DP, IC95, só superior, traço terminal), letras, colchetes de significância, linhas de referência,
-textos livres, legenda e equações (com faixa de confiança da curva). O modo **Painel** monta figuras com vários
-gráficos e rótulos a/b/c; o modo **Tema global** define o padrão de todas as figuras, que pode ser salvo e
-recarregado como arquivo .json.
+Cada figura pode ser ajustada em detalhe, com prévia ao vivo no tamanho exato em mm:
+- **Ajuste rápido** (ao lado de cada gráfico em Resultados e na barra do Estúdio): tipo de gráfico, valores
+  individuais ligados ou desligados, barra de erro, letras, paleta, largura e — nas regressões — o **modelo ajustado**
+  de cada curva e a faixa de confiança/predição.
+- **Tipos de gráfico de médias**: pontos, barras, box, meia-caixa + dados, violino, meio-violino + dados, raincloud,
+  beeswarm e linhas (gráfico de interação). Rótulos com o valor das médias, contorno automático, hachuras com
+  espessura ajustável.
+- **Eixos**: escalas linear, log10, log2, ln e raiz quadrada; divisão por 10ⁿ com “(×10ⁿ)” no título; separador de
+  milhar; direção e comprimento das marcas; eixos destacados; eixo quebrado; linha da média geral.
+- **Texto formatado** em títulos, nomes e anotações: `kg ha^-1` → kg ha⁻¹, `P_{2}O_{5}` → P₂O₅,
+  `*Crotalaria juncea*` → itálico, `\\alpha` → α, `\\deg` → °.
+- **Anotações**: colchetes de significância, linhas de referência, faixas sombreadas (ex.: teor adequado), setas,
+  retângulos, elipses e textos livres.
+- **Regressão**: faixa de confiança (curva média) ou de predição (nova observação), em 90, 95 ou 99%.
+- **Desfazer** cada alteração, **buscar opção** pelo nome e **copiar e colar formato** entre figuras escolhendo as
+  partes (fontes, eixos, séries…), como no OriginPro.
+- **Painel**: grade de até 4 × 4 com rótulos a/b/c, mesma escala de Y em todos os painéis e números internos ocultos.
+- **Exportação**: PNG e TIFF (LZW, RGB ou CMYK) na resolução escolhida; SVG e EPS com texto editável ou em
+  contornos; PDF vetorial com fontes embutidas.
+- **Tema global**: o padrão de todas as figuras, que pode ser salvo e recarregado como arquivo .json.
+
+#### Aparência
+A plataforma tem dois temas — painel grafite (escuro) e bancada bege (claro) — escolhidos no menu ⋮ → *Settings* →
+*Theme*. As figuras são sempre geradas em fundo branco, prontas para publicação.
 
 #### Análises complementares (v2.1)
 - **Tamanhos de efeito** na ANOVA: η²p e ω²p (ω²p é menos enviesado em amostras pequenas).
@@ -998,3 +952,27 @@ Toda tabela tem botões **Excel** e **Word** no padrão de periódico: filetes d
 cabeçalho, sem linhas verticais e apenas o cabeçalho em negrito (no Excel, as espessuras equivalentes são “média”
 e “fina”; no Word, exatas).
 """)
+
+
+# ============================================================================
+# Cabeçalho com o estado de cada etapa (preenchido por último, aparece no topo)
+# ============================================================================
+def _etapas():
+    if ss.df is None:
+        return [("Dados", "aguardando", ""), ("Análise", "", ""), ("Figuras", "", "")]
+    out = [("Dados", f"{len(ss.df)} linhas", "ok")]
+    ok = [r for r in ss.resultados.values() if not isinstance(r, Exception)]
+    erros = len(ss.resultados) - len(ok)
+    if not ss.resultados:
+        return out + [("Análise", "a executar", ""), ("Figuras", "", "")]
+    out.append(("Análise", f"{len(ok)} variável(is)" + (f", {erros} com erro" if erros else ""),
+                "alerta" if erros else "ok"))
+    violados = sum(1 for r in ok if (r.pressupostos.ok_normalidade is False or r.pressupostos.ok_homogeneidade is False))
+    out.append(("Pressupostos", "atendidos" if not violados else f"{violados} com alerta", "alerta" if violados else "ok"))
+    n_aj = sum(1 for v in ss.ajustes.values() if v)
+    out.append(("Figuras", f"{n_aj} ajustada(s)" if n_aj else "tema padrão", "ok"))
+    return out
+
+
+with _topo:
+    estilo.cabecalho(_etapas())

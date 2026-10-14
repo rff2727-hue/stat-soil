@@ -11,8 +11,9 @@ import pandas as pd
 import streamlit as st
 
 from motor import figuras as fg, tema as tm
-from ui_comum import (MIMES, ROT_FMT, botoes_figura, catalogo, hash_tema, previa, rotulo_item, ss, tema_base,
-                      tema_figura)
+from ui_comum import (MIMES, ROT_FMT, botoes_figura, catalogo, hash_tema, nova_versao, previa, rotulo_item, ss,
+                      tema_base, tema_figura)
+from motor.regressao import CATALOGO
 
 ABAS_POR_TIPO = {
     "medias": ["Tela", "Fontes", "Eixos", "Séries", "Médias", "Erros e letras", "Legenda"],
@@ -25,17 +26,34 @@ ABAS_POR_TIPO = {
     "diagnostico": ["Tela", "Fontes", "Eixos", "Séries", "Médias", "Painel"],
 }
 # parâmetros irrelevantes por tipo (para enxugar a interface)
+_SO_BARRAS = {"medias.rotulo_valor", "medias.rotulo_decimais", "medias.contorno_auto", "medias.hachura_esp"}
 OCULTAR = {
     "regressao": {"medias.tipo", "medias.horizontal", "medias.largura", "medias.barra_alfa", "medias.barra_cor",
                   "medias.contorno_esp", "medias.contorno_cor", "medias.hachuras", "medias.obs_lado",
                   "medias.espaco_grupos", "medias.conectar", "letras.mostrar", "letras.se_ns", "letras.posicao",
-                  "letras.distancia", "letras.italico", "letras.separar", "series.colorir_niveis"},
+                  "letras.distancia", "letras.italico", "letras.separar", "series.colorir_niveis"} | _SO_BARRAS,
     "perfil": {"letras.mostrar", "letras.se_ns", "letras.posicao", "letras.distancia", "letras.italico", "letras.separar",
-               "series.colorir_niveis"},
-    "grupos": {"medias.horizontal", "series.colorir_niveis", "medias.obs_lado", "medias.barra_cor"},
-    "medias": {"medias.espaco_grupos", "medias.conectar", "letras.separar"},
-    "pca": {"eixos.quebra_de", "eixos.quebra_ate", "eixos.y_log", "series.colorir_niveis", "series.variar_linha"},
+               "series.colorir_niveis", "eixos.y_escala", "eixos.y_fator", "eixos.y_log", "eixos.y_min", "eixos.y_max",
+               "eixos.y_passo", "eixos.y_decimais", "eixos.quebra_de", "eixos.quebra_ate", "eixos.x_rotacao"},
+    "grupos": {"medias.horizontal", "series.colorir_niveis", "medias.obs_lado", "medias.barra_cor", "eixos.x_escala",
+               "eixos.x_min", "eixos.x_max", "eixos.x_passo", "eixos.x_decimais"},
+    "medias": {"medias.espaco_grupos", "medias.conectar", "letras.separar", "eixos.x_escala", "eixos.x_min",
+               "eixos.x_max", "eixos.x_passo", "eixos.x_decimais"},
+    "pca": {"eixos.quebra_de", "eixos.quebra_ate", "eixos.y_log", "series.colorir_niveis", "series.variar_linha",
+            "eixos.y_fator"},
+    "dendrograma": {"eixos.y_escala", "eixos.y_fator", "eixos.y_log", "eixos.y_min", "eixos.y_max", "eixos.y_passo",
+                    "eixos.y_decimais", "eixos.quebra_de", "eixos.quebra_ate", "eixos.x_rotacao", "eixos.linha_media",
+                    "series.colorir_niveis", "series.marcador_tam", "series.marcador_borda", "series.marcador_borda_cor",
+                    "series.vazados", "series.variar_marcador", "series.variar_linha"},
 }
+# opções de tipo de gráfico válidas para cada figura
+TIPOS_VALIDOS = {"medias": ["pontos", "barras", "box", "meia-caixa", "violino", "meio-violino", "raincloud", "beeswarm",
+                            "linhas"],
+                 "grupos": ["pontos", "barras", "box", "linhas"]}
+# o que fica de fora ao copiar/colar formato (específico dos dados de cada figura)
+NAO_COPIAR = ("eixos.y_min", "eixos.y_max", "eixos.y_passo", "eixos.x_min", "eixos.x_max", "eixos.x_passo",
+              "eixos.rotulo_x", "eixos.rotulo_y", "eixos.quebra_de", "eixos.quebra_ate", "tela.titulo")
+HIST_MAX = 40
 
 
 # ============================================================================
@@ -93,7 +111,35 @@ def _exibir(p, v):
     return v
 
 
+def _snapshot(escopo):
+    """Guarda o estado antes de cada alteração (botão Desfazer)."""
+    h = ss.setdefault("historico", {}).setdefault(escopo, [])
+    h.append(copy.deepcopy(_alvo(escopo)))
+    del h[:-HIST_MAX]
+
+
+def _desfazer(escopo):
+    h = ss.get("historico", {}).get(escopo) or []
+    if not h:
+        return
+    anterior = h.pop()
+    if escopo == "GLOBAL":
+        ss.tema_global = anterior
+    elif escopo == "PAINEL":
+        ss.painel_tema = anterior
+    else:
+        ss.ajustes[escopo] = anterior
+    _limpar_widgets(escopo)
+
+
+def _restaurar(escopo):
+    _snapshot(escopo)
+    ss.ajustes.pop(escopo, None)
+    _limpar_widgets(escopo)
+
+
 def _cb(escopo, chave, wkey):
+    _snapshot(escopo)
     p = tm.POR_CHAVE[chave]
     v = _parse(p, ss[wkey])
     alvo = _alvo(escopo)
@@ -103,21 +149,24 @@ def _cb(escopo, chave, wkey):
         alvo[chave] = v
 
 
-def _widget(p, escopo, valor, coluna):
-    wkey = f"ed|{escopo}|{p.chave}"
+def _widget(p, escopo, valor, coluna, prefixo="ed", opcoes=None, rotulo=None):
+    wkey = f"{prefixo}|{escopo}|{p.chave}"
     desejado = _exibir(p, valor)
     if ss.get(wkey) != desejado:
         ss[wkey] = desejado
+    if opcoes and desejado not in opcoes:
+        desejado = opcoes[0]
+        ss[wkey] = desejado
     marcado = "● " if p.chave in _alvo(escopo) else ""
     kw = dict(key=wkey, on_change=_cb, args=(escopo, p.chave, wkey), help=p.ajuda or None)
-    rot = marcado + p.rotulo
+    rot = marcado + (rotulo or p.rotulo)
     with coluna:
         if p.tipo == "bool":
             st.toggle(rot, **kw)
         elif p.tipo == "cor":
             st.color_picker(rot, **kw)
         elif p.tipo == "escolha":
-            st.selectbox(rot, p.opcoes, **kw)
+            st.selectbox(rot, opcoes or p.opcoes, **kw)
         elif p.tipo == "texto":
             st.text_input(rot, **kw)
         elif p.tipo == "num" and p.padrao is None:
@@ -131,12 +180,34 @@ def _widget(p, escopo, valor, coluna):
                             max_value=int(p.maximo) if p.maximo is not None else None, step=int(p.passo or 1), **kw)
 
 
-def controles_aba(aba, escopo, t, tipo=None):
-    params = [p for p in tm.PARAMS if p.aba == aba and p.tipo not in ("dict", "lista")
-              and p.chave not in OCULTAR.get(tipo, set())]
+def _visiveis(tipo):
+    return [p for p in tm.PARAMS if p.tipo not in ("dict", "lista") and p.chave not in OCULTAR.get(tipo, set())]
+
+
+def controles_aba(aba, escopo, t, tipo=None, prefixo="ed"):
+    params = [p for p in _visiveis(tipo) if p.aba == aba]
     c1, c2 = st.columns(2)
     for i, p in enumerate(params):
-        _widget(p, escopo, t[p.chave], c1 if i % 2 == 0 else c2)
+        _widget(p, escopo, t[p.chave], c1 if i % 2 == 0 else c2, prefixo,
+                opcoes=TIPOS_VALIDOS.get(tipo) if p.chave == "medias.tipo" else None)
+    if aba == "Eixos":
+        st.caption("Títulos aceitam códigos: kg ha^-1 → kg ha⁻¹ · P_{2}O_{5} → P₂O₅ · *Crotalaria* → itálico · "
+                   "\\alpha → α · \\deg → °")
+
+
+def busca_parametros(escopo, t, tipo, termo):
+    termo = termo.strip().lower()
+    achados = [p for p in _visiveis(tipo) if termo in p.rotulo.lower() or termo in p.chave.lower()
+               or termo in (p.ajuda or "").lower() or termo in p.aba.lower()]
+    if not achados:
+        st.caption("Nenhuma opção encontrada.")
+        return
+    st.caption(f"{len(achados)} opção(ões) para “{termo}”")
+    c1, c2 = st.columns(2)
+    for i, p in enumerate(achados[:24]):
+        _widget(p, escopo, t[p.chave], c1 if i % 2 == 0 else c2, "busca",
+                opcoes=TIPOS_VALIDOS.get(tipo) if p.chave == "medias.tipo" else None,
+                rotulo=f"{p.rotulo}  ·  {p.aba}")
 
 
 # ============================================================================
@@ -156,6 +227,7 @@ def _set_dict(escopo, chave, sub, valor, base_val):
 
 
 def _cb_grupo(escopo, chave, sub, wkey, base_val):
+    _snapshot(escopo)
     v = ss[wkey]
     if chave == "grupos.marcadores":
         v = v if v != "auto" else None
@@ -248,6 +320,7 @@ def secao_niveis(sp, escopo, t):
             sub = ed[ed["Papel"] == papel].sort_values("Posição", kind="stable")
             ordem_n += list(sub["Nível"])
         ocultar = [r["Nível"] for _, r in ed.iterrows() if r["Ocultar"]]
+        _snapshot(escopo)
         alvo = _alvo(escopo)
         for k, v in (("niveis.renomear", renomear), ("niveis.ordem", ordem_n), ("niveis.ocultar", ocultar)):
             if v:
@@ -270,6 +343,7 @@ def _editor_lista(escopo, t, chave, colunas, config, titulo, ajuda=""):
         linhas = [ {k: (None if (isinstance(v, float) and pd.isna(v)) else v) for k, v in r.items()}
                    for r in ed.to_dict("records")]
         linhas = [l for l in linhas if any(v not in (None, "") for v in l.values())]
+        _snapshot(escopo)
         alvo = _alvo(escopo)
         if linhas:
             alvo[chave] = linhas
@@ -293,11 +367,124 @@ def secao_anotacoes(sp, escopo, t):
                    "estilo": st.column_config.SelectboxColumn("estilo", options=list(tm.ESTILOS_LINHA), default="tracejada"),
                    "cor": st.column_config.TextColumn("cor (hex)", default="#7A7A7A")},
                   "Linhas de referência", "Ex.: nível crítico, teor adequado, média geral.")
+    _editor_lista(escopo, t, "anot.faixas", {"eixo": "object", "de": "float", "ate": "float", "cor": "object",
+                                             "alfa": "float", "texto": "object"},
+                  {"eixo": st.column_config.SelectboxColumn("eixo", options=["y", "x"], default="y"),
+                   "ate": st.column_config.NumberColumn("até"),
+                   "cor": st.column_config.TextColumn("cor (hex)", default="#D9C9B6"),
+                   "alfa": st.column_config.NumberColumn("opacidade", default=0.25, min_value=0.02, max_value=1.0,
+                                                          step=0.05)},
+                  "Faixas sombreadas", "Ex.: faixa adequada de um nutriente, dose ótima, período crítico (unidades dos dados).")
+    _editor_lista(escopo, t, "anot.formas", {"tipo": "object", "x0": "float", "y0": "float", "x1": "float",
+                                             "y1": "float", "cor": "object", "texto": "object"},
+                  {"tipo": st.column_config.SelectboxColumn("tipo", options=["seta", "linha", "retângulo", "elipse"],
+                                                            default="seta"),
+                   "x0": st.column_config.NumberColumn("x início", default=0.3, step=0.01),
+                   "y0": st.column_config.NumberColumn("y início", default=0.9, step=0.01),
+                   "x1": st.column_config.NumberColumn("x fim", default=0.2, step=0.01),
+                   "y1": st.column_config.NumberColumn("y fim", default=0.7, step=0.01),
+                   "cor": st.column_config.TextColumn("cor (hex)", default="#1A1A1A")},
+                  "Setas e formas", "Posições em fração do eixo (0–1). Na seta, o texto fica no início e a ponta no fim.")
     _editor_lista(escopo, t, "anot.textos", {"x": "float", "y": "float", "texto": "object", "tam": "float"},
                   {"x": st.column_config.NumberColumn("x (0–1)", default=0.05, step=0.01),
                    "y": st.column_config.NumberColumn("y (0–1)", default=0.95, step=0.01),
                    "tam": st.column_config.NumberColumn("tamanho (pt)", default=7.0, step=0.5)},
-                  "Textos livres", "Posição em fração do eixo: (0, 0) = canto inferior esquerdo; (1, 1) = superior direito.")
+                  "Textos livres", "Posição em fração do eixo: (0, 0) = canto inferior esquerdo; (1, 1) = superior direito. "
+                  "Aceita ^{ } sobrescrito, _{ } subscrito, *itálico* e \\alpha.")
+
+
+# ============================================================================
+# Modelo ajustado (curvas de regressão)
+# ============================================================================
+def _trocar_modelo(it, chave_curva, wkey):
+    cod = ss[wkey]
+    ss.modelo_escolhido.setdefault((it.grupo, it.variavel), {})[chave_curva] = cod
+    nova_versao()
+
+
+def secao_modelos(it, sp, prefixo="mdl"):
+    """Escolha do modelo de cada curva — o mesmo ajuste usado no texto, no Excel e no relatório."""
+    curvas = [c for c in sp.curvas if c.ajustes and c.chave is not None]
+    if not curvas:
+        return
+    for c in curvas:
+        cods = [a.codigo for a in c.ajustes]
+        atual = c.modelo.codigo if c.modelo is not None else cods[0]
+        wkey = f"{prefixo}|{it.id}|{c.chave}"
+        if ss.get(wkey) != atual:
+            ss[wkey] = atual
+        rot = "Modelo ajustado" + (f" — {c.rotulo}" if c.rotulo is not None else "")
+        r2 = {a.codigo: a.r2 for a in c.ajustes}
+        st.selectbox(rot, cods, key=wkey, on_change=_trocar_modelo, args=(it, c.chave, wkey),
+                     format_func=lambda k, r2=r2: f"{CATALOGO[k].nome}  ·  R² {r2[k]:.3f}".replace(".", ","),
+                     help="Lista todos os modelos que convergiram, do mais indicado (AICc) ao menos indicado.")
+
+
+# ============================================================================
+# Barra rápida (os ajustes mais usados, como a mini barra de ferramentas do OriginPro)
+# ============================================================================
+RAPIDOS = {
+    "medias": ["medias.tipo", "medias.obs", "erro.tipo", "letras.mostrar", "series.paleta", "tela.largura_mm"],
+    "grupos": ["medias.tipo", "medias.obs", "erro.tipo", "letras.mostrar", "series.paleta", "tela.largura_mm"],
+    "regressao": ["medias.obs", "reg.banda", "reg.banda_tipo", "reg.equacao", "erro.tipo", "tela.largura_mm"],
+    "perfil": ["erro.tipo", "series.paleta", "series.marcador_tam", "tela.largura_mm"],
+    "pca": ["pca.elipses", "pca.setas", "series.paleta", "tela.largura_mm"],
+    "correlacao": ["cor.triangulo", "cor.valores", "cor.paleta", "tela.largura_mm"],
+    "dendrograma": ["series.paleta", "series.linha_esp", "tela.largura_mm"],
+    "diagnostico": ["series.cor_unica", "medias.obs_alfa", "tela.largura_mm"],
+}
+ROTULOS_RAPIDOS = {"medias.obs": "Valores individuais", "medias.tipo": "Tipo de gráfico", "erro.tipo": "Barra de erro",
+                   "letras.mostrar": "Letras", "series.paleta": "Paleta", "tela.largura_mm": "Largura (mm)",
+                   "reg.banda": "Faixa da curva", "reg.banda_tipo": "Tipo de faixa", "reg.equacao": "Equação"}
+
+
+def barra_rapida(it, t, prefixo="rap", vertical=False):
+    sp = it.spec
+    chaves = RAPIDOS.get(sp.tipo, ["tela.largura_mm"])
+    cols = [st.container() for _ in chaves] if vertical else st.columns(len(chaves))
+    for c, k in zip(cols, chaves):
+        p = tm.POR_CHAVE[k]
+        _widget(p, it.id, t[k], c, prefixo, opcoes=TIPOS_VALIDOS.get(sp.tipo) if k == "medias.tipo" else None,
+                rotulo=ROTULOS_RAPIDOS.get(k))
+
+
+# ============================================================================
+# Copiar e colar formato
+# ============================================================================
+def secao_formato(it, cat, t):
+    sp = it.spec
+    with st.expander("Copiar e colar formato entre figuras"):
+        st.caption("Leva o formato desta figura (como está na prévia) para outras figuras, escolhendo quais partes. "
+                   "Limites dos eixos, títulos e quebra de eixo ficam de fora, pois dependem dos dados.")
+        partes_ok = [a for a in tm.ABAS if a not in ("Painel", "Multivariada")]
+        partes = st.multiselect("Partes do formato", partes_ok, key=f"cf_partes|{it.id}",
+                                default=["Fontes", "Eixos", "Séries", "Médias", "Erros e letras", "Legenda"])
+        mesmos = [k for k, v in cat.items() if k != it.id and v.spec.tipo != "diagnostico"]
+        padrao = [k for k in mesmos if cat[k].spec.tipo == sp.tipo]
+        alvos = st.multiselect("Colar em", mesmos, default=padrao, key=f"cf_alvos|{it.id}",
+                               format_func=lambda k: rotulo_item(cat[k]))
+        c1, c2 = st.columns(2)
+        com_grupos = c1.toggle("Incluir cores e marcadores por grupo", value=False, key=f"cf_grp|{it.id}")
+        com_niveis = c2.toggle("Incluir nomes, ordem e anotações", value=False, key=f"cf_niv|{it.id}")
+        if st.button("Colar formato", type="primary", disabled=not (alvos and partes), key=f"cf_ok|{it.id}"):
+            chaves = [p.chave for p in tm.PARAMS if p.aba in partes and p.chave not in NAO_COPIAR
+                      and p.tipo not in ("dict", "lista")]
+            if com_grupos:
+                chaves += ["grupos.cores", "grupos.marcadores", "grupos.linhas"]
+            if com_niveis:
+                chaves += ["niveis.renomear", "niveis.ordem", "niveis.ocultar", "anot.colchetes", "anot.linhas",
+                           "anot.textos", "anot.faixas", "anot.formas"]
+            base = tema_base()
+            for k_alvo in alvos:
+                _snapshot(k_alvo)
+                aj = ss.ajustes.setdefault(k_alvo, {})
+                for ch in chaves:
+                    if t[ch] == base.get(ch):
+                        aj.pop(ch, None)
+                    else:
+                        aj[ch] = copy.deepcopy(t[ch])
+                _limpar_widgets(k_alvo)
+            st.toast(f"Formato colado em {len(alvos)} figura(s).")
 
 
 # ============================================================================
@@ -312,67 +499,74 @@ def modo_figura(idioma):
     ids = list(cat)
     if ss.get("est_sel_fig") not in ids:
         ss.est_sel_fig = ss.estudio_fig if ss.get("estudio_fig") in ids else ids[0]
-    sel = st.selectbox("Figura", ids, format_func=lambda i: rotulo_item(cat[i]), key="est_sel_fig")
+    c_sel, c_desf, c_rest = st.columns([6, 1.2, 1.2], vertical_alignment="bottom")
+    sel = c_sel.selectbox("Figura", ids, format_func=lambda i: rotulo_item(cat[i]), key="est_sel_fig")
     ss.estudio_fig = sel
     it = cat[sel]
     sp = it.spec
     t = tema_figura(it.id, sp.tipo)
     n_aj = len(ss.ajustes.get(it.id, {}))
+    n_hist = len(ss.get("historico", {}).get(it.id, []))
+    c_desf.button("↶ Desfazer", width="stretch", disabled=n_hist == 0, key="est_desfazer",
+                  help=f"{n_hist} alteração(ões) para desfazer", on_click=_desfazer, args=(it.id,))
+    c_rest.button("Restaurar", width="stretch", disabled=n_aj == 0, key="est_restaurar",
+                  help="Volta esta figura ao tema global", on_click=_restaurar, args=(it.id,))
+    with st.container(key="barra_rapida"):
+        barra_rapida(it, t)
+        if sp.tipo == "regressao":
+            secao_modelos(it, sp, "mdl_rap")
     col_ctrl, col_prev = st.columns([5, 6], gap="large")
     with col_prev:
-        st.markdown(f"<div class='rotulo-mono'>PRÉVIA · {t['tela.largura_mm']:g} × "
-                    f"{(t['tela.altura_mm'] or fg._altura_padrao(sp, t)):.0f} mm · {n_aj} ajuste(s) nesta figura</div>",
-                    unsafe_allow_html=True)
-        try:
-            png = previa(it, t, idioma, dpi=150)
-            st.image(png, width="content")
-        except Exception as e:  # mostra o erro sem derrubar o editor
-            st.error(f"Não foi possível desenhar com estes ajustes: {e}")
-        st.markdown("<div class='rotulo-mono'>EXPORTAR</div>", unsafe_allow_html=True)
-        botoes_figura(it, idioma, "est", t=t)
-        b1, b2, b3 = st.columns(3)
-        if b1.button("Restaurar esta figura", width="stretch", disabled=n_aj == 0):
-            ss.ajustes.pop(it.id, None)
-            _limpar_widgets(it.id)
-            st.rerun(scope="fragment")
-        if b2.button("Aplicar a figuras do mesmo tipo", width="stretch", disabled=n_aj == 0,
-                     help="Copia os ajustes de estilo (exceto nomes de níveis e anotações) para todas as figuras deste tipo"):
-            estilo = {k: v for k, v in ss.ajustes.get(it.id, {}).items()
-                      if not k.startswith(("niveis.", "anot.", "eixos.rotulo", "eixos.y_", "eixos.x_", "tela.titulo"))}
-            for oid, oit in cat.items():
-                if oit.spec.tipo == sp.tipo and oid != it.id:
-                    ss.ajustes.setdefault(oid, {}).update(estilo)
-            st.toast("Estilo aplicado às figuras do mesmo tipo.")
-        if b3.button("Tornar tema global", width="stretch", disabled=n_aj == 0,
-                     help="Leva os ajustes de estilo desta figura para o tema de todas as figuras"):
-            estilo = {k: v for k, v in ss.ajustes.get(it.id, {}).items()
-                      if not k.startswith(("niveis.", "anot.", "grupos.", "eixos.rotulo", "eixos.y_", "eixos.x_", "tela.titulo"))}
-            ss.tema_global.update(estilo)
-            for k in estilo:
-                ss.ajustes[it.id].pop(k, None)
-            st.rerun()
-        st.download_button("Salvar ajustes desta figura (.json)",
-                           tm.para_json(ss.ajustes.get(it.id, {}), f"Ajustes — {it.titulo}"),
-                           file_name=f"ajustes_{it.nome}.json", mime="application/json", width="stretch")
+        with st.container(key="previa_fixa"):
+            alt = t["tela.altura_mm"] or (fg._altura_padrao(sp, t) if sp.tipo != "diagnostico" else 0)
+            st.html(f"<div class='ss-legenda'><b>Prévia</b> em {t['tela.largura_mm']:g} × {alt:.0f} mm, "
+                    f"{n_aj} ajuste(s) próprio(s) nesta figura</div>")
+            try:
+                png = previa(it, t, idioma, dpi=150)
+                st.image(png, width="content")
+            except Exception as e:  # mostra o erro sem derrubar o editor
+                st.error(f"Não foi possível desenhar com estes ajustes: {e}")
+            st.html("<div class='ss-legenda'><b>Exportar</b> no tamanho exato acima</div>")
+            botoes_figura(it, idioma, "est", formatos=("png", "tiff", "svg", "pdf", "eps"), t=t)
+            b1, b2 = st.columns(2)
+            if b1.button("Tornar tema global", width="stretch", disabled=n_aj == 0, key="est_global",
+                         help="Leva os ajustes de estilo desta figura para o tema de todas as figuras"):
+                estilo = {k: v for k, v in ss.ajustes.get(it.id, {}).items()
+                          if not k.startswith(("niveis.", "anot.", "grupos.")) and k not in NAO_COPIAR}
+                ss.tema_global.update(estilo)
+                for k in estilo:
+                    ss.ajustes[it.id].pop(k, None)
+                st.rerun()
+            b2.download_button("Salvar ajustes (.json)",
+                               tm.para_json(ss.ajustes.get(it.id, {}), f"Ajustes — {it.titulo}"),
+                               file_name=f"ajustes_{it.nome}.json", mime="application/json", width="stretch")
+            secao_formato(it, cat, t)
     with col_ctrl:
-        abas = ABAS_POR_TIPO.get(sp.tipo, tm.ABAS)
-        extras = ["Grupos e níveis"] + (["Anotações"] if sp.tipo in ("medias", "grupos", "regressao", "perfil") else [])
-        tabs = st.tabs(abas + extras)
-        for tab, aba in zip(tabs, abas + extras):
-            with tab:
-                if aba == "Grupos e níveis":
-                    secao_grupos(sp, it.id, t)
-                    secao_niveis(sp, it.id, t)
-                elif aba == "Anotações":
-                    secao_anotacoes(sp, it.id, t)
-                else:
-                    controles_aba(aba, it.id, t, sp.tipo)
-        st.caption("● indica parâmetro alterado nesta figura. Demais valores vêm do tema global.")
+        termo = st.text_input("Buscar opção", key=f"est_busca", placeholder="ex.: hachura, log, legenda, decimais…",
+                              label_visibility="collapsed")
+        if termo.strip():
+            busca_parametros(it.id, t, sp.tipo, termo)
+        else:
+            abas = ABAS_POR_TIPO.get(sp.tipo, tm.ABAS)
+            extras = ["Grupos e níveis"] + (["Anotações"] if sp.tipo in ("medias", "grupos", "regressao", "perfil") else [])
+            tabs = st.tabs(abas + extras)
+            for tab, aba in zip(tabs, abas + extras):
+                with tab:
+                    if aba == "Grupos e níveis":
+                        secao_grupos(sp, it.id, t)
+                        secao_niveis(sp, it.id, t)
+                    elif aba == "Anotações":
+                        secao_anotacoes(sp, it.id, t)
+                    else:
+                        if aba == "Regressão":
+                            secao_modelos(it, sp)
+                        controles_aba(aba, it.id, t, sp.tipo)
+        st.caption("● parâmetro alterado nesta figura; os demais vêm do tema global. Cada alteração pode ser desfeita.")
 
 
 def _limpar_widgets(escopo):
     for k in list(ss.keys()):
-        if isinstance(k, str) and k.startswith(("ed|", "edg|", "edn|", "edl|")) and f"|{escopo}" in k:
+        if isinstance(k, str) and k.startswith(("ed|", "edg|", "edn|", "edl|", "rap|", "busca|", "mdl|", "mdl_rap|", "rres|", "mres|")) and f"|{escopo}" in k:
             del ss[k]
 
 
@@ -433,7 +627,8 @@ def modo_painel(idioma):
             itens.append((it.spec, t))
     with col_prev:
         if not any(sp for sp, _ in itens):
-            st.info("Escolha as figuras de cada painel.")
+            import estilo
+            estilo.vazio("Painel vazio", "Escolha à esquerda a figura de cada posição (a, b, c…).")
             return
         alt = cfg["altura"] or None
         k = ("painel", ss.versao, json.dumps(cfg, sort_keys=True), hash_tema(tp),
@@ -441,10 +636,10 @@ def modo_painel(idioma):
         if k not in ss.cache_figs:
             ss.cache_figs[k] = fg.gerar_painel(itens, cfg["linhas"], cfg["colunas"], tp, idioma, cfg["largura"], alt,
                                                dpi=130)
-        st.markdown(f"<div class='rotulo-mono'>PRÉVIA · {cfg['largura']:g} mm de largura</div>", unsafe_allow_html=True)
+        st.html(f"<div class='ss-legenda'><b>Prévia</b> do painel em {cfg['largura']:g} mm de largura</div>")
         st.image(ss.cache_figs[k], width="stretch")
-        cols = st.columns(4)
-        for col, fmt in zip(cols, ("png", "svg", "pdf", "tiff")):
+        cols = st.columns(5)
+        for col, fmt in zip(cols, ("png", "tiff", "svg", "pdf", "eps")):
             col.download_button(ROT_FMT[fmt], data=(lambda f=fmt: fg.gerar_painel(itens, cfg["linhas"], cfg["colunas"], tp,
                                                                                   idioma, cfg["largura"], alt, fmt=f)),
                                 file_name=f"painel.{fmt}", mime=MIMES[fmt], key=f"pn_dl_{fmt}", width="stretch")
@@ -492,7 +687,7 @@ def modo_global(idioma):
     with col_prev:
         st.download_button("Salvar tema global (.json)", tm.para_json({**tm.PRESETS.get(ss.tema_preset, {}),
                                                                        **ss.tema_global}, "Meu tema"),
-                           file_name="tema_estatistica_experimental.json", mime="application/json", width="stretch")
+                           file_name="tema_stat_soil.json", mime="application/json", width="stretch")
         if cat:
             ids = [i for i in cat if cat[i].spec.tipo != "diagnostico"]
             if ids:
@@ -519,3 +714,13 @@ def render(idioma="pt"):
         modo_global(idioma)
     else:
         modo_figura(idioma)
+
+
+def ajuste_rapido(it, idioma="pt", chave=""):
+    """Popover ao lado de cada figura na aba Resultados: tipo, valores individuais, erro, modelo…"""
+    t = tema_figura(it.id, it.spec.tipo)
+    with st.popover("Ajuste rápido", width="stretch"):
+        barra_rapida(it, t, "rres", vertical=True)
+        if it.spec.tipo == "regressao":
+            secao_modelos(it, it.spec, "mres")
+        st.caption("Para tudo o mais (fontes, eixos, cores, anotações), use o Estúdio.")

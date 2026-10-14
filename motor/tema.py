@@ -78,7 +78,12 @@ PARAMS = [
     P("tela.fundo", "#FFFFFF", "cor", "Cor de fundo", "Tela"),
     P("tela.transparente", False, "bool", "Fundo transparente na exportação", "Tela"),
     P("tela.margem", 0.3, "num", "Margem ao redor da figura", "Tela", minimo=0, maximo=3, passo=0.1),
-    P("tela.titulo", "", "texto", "Título da figura (opcional)", "Tela"),
+    P("tela.titulo", "", "texto", "Título da figura (opcional)", "Tela",
+      ajuda="Aceita códigos: ^{-1} sobrescrito, _{2} subscrito, *texto* itálico, \\alpha letras gregas"),
+    P("tela.svg_texto", "editável", "escolha", "Texto no SVG/EPS", "Tela", opcoes=["editável", "contornos"],
+      ajuda="Editável: o texto continua texto (Illustrator/Inkscape). Contornos: vira desenho (sem depender de fontes)."),
+    P("tela.tiff_cor", "RGB", "escolha", "Cores do TIFF", "Tela", opcoes=["RGB", "CMYK"],
+      ajuda="Algumas gráficas e editoras pedem TIFF em CMYK (sempre com compressão LZW)."),
     # ------------------------------------------------------------------ Fontes
     P("fonte.familia", "Roboto", "escolha", "Família", "Fontes", opcoes=list(FONTES)),
     P("fonte.tamanho", 7.0, "num", "Tamanho base (pt)", "Fontes", minimo=4, maximo=24, passo=0.5),
@@ -107,16 +112,23 @@ PARAMS = [
     P("eixos.y_min", None, "num", "Y mínimo (vazio = automático)", "Eixos"),
     P("eixos.y_max", None, "num", "Y máximo (vazio = automático)", "Eixos"),
     P("eixos.y_passo", None, "num", "Intervalo das marcas de Y", "Eixos"),
-    P("eixos.y_log", False, "bool", "Escala logarítmica em Y", "Eixos"),
+    P("eixos.y_log", False, "bool", "Escala logarítmica em Y (log10)", "Eixos"),
+    P("eixos.y_escala", "linear", "escolha", "Escala de Y", "Eixos", opcoes=["linear", "log10", "log2", "ln", "raiz quadrada"]),
+    P("eixos.y_fator", 0, "int", "Dividir números de Y por 10ⁿ (n)", "Eixos", minimo=0, maximo=9, passo=1,
+      ajuda="Ex.: n = 3 mostra 2,5 no lugar de 2500 e acrescenta (×10³) ao título do eixo"),
     P("eixos.y_decimais", -1, "int", "Casas decimais em Y (−1 = auto)", "Eixos", minimo=-1, maximo=6, passo=1),
     P("eixos.x_min", None, "num", "X mínimo (eixos numéricos)", "Eixos"),
     P("eixos.x_max", None, "num", "X máximo (eixos numéricos)", "Eixos"),
     P("eixos.x_passo", None, "num", "Intervalo das marcas de X (numérico)", "Eixos"),
     P("eixos.x_decimais", -1, "int", "Casas decimais em X (−1 = auto)", "Eixos", minimo=-1, maximo=6, passo=1),
+    P("eixos.x_escala", "linear", "escolha", "Escala de X (eixos numéricos)", "Eixos",
+      opcoes=["linear", "log10", "log2", "ln", "raiz quadrada"]),
     P("eixos.x_rotacao", 0, "int", "Rotação dos rótulos de X (graus)", "Eixos", minimo=0, maximo=90, passo=5),
     P("eixos.quebra_de", None, "num", "Quebrar eixo Y de…", "Eixos", ajuda="Eixo quebrado: valor inferior do intervalo omitido"),
     P("eixos.quebra_ate", None, "num", "…até", "Eixos", ajuda="Eixo quebrado: valor superior do intervalo omitido"),
     P("eixos.decimal", "auto", "escolha", "Separador decimal", "Eixos", opcoes=["auto", "vírgula", "ponto"]),
+    P("eixos.milhar", False, "bool", "Separador de milhar nos números (2.500)", "Eixos"),
+    P("eixos.linha_media", False, "bool", "Linha da média geral", "Eixos"),
     P("eixos.linha_zero", False, "bool", "Linha de referência em y = 0", "Eixos"),
     P("eixos.grade", False, "bool", "Linhas de grade (Y)", "Eixos"),
     P("eixos.grade_cor", "#E6E6E6", "cor", "Cor da grade", "Eixos"),
@@ -142,14 +154,19 @@ PARAMS = [
     P("niveis.ocultar", [], "lista", "Ocultar níveis", "Séries"),
     # ------------------------------------------------------------------ Médias
     P("medias.tipo", "pontos", "escolha", "Tipo de gráfico", "Médias",
-      opcoes=["pontos", "barras", "box", "violino", "raincloud", "beeswarm"]),
+      opcoes=["pontos", "barras", "box", "meia-caixa", "violino", "meio-violino", "raincloud", "beeswarm", "linhas"],
+      ajuda="Meia-caixa/meio-violino: distribuição de um lado e dados do outro. Linhas: médias ligadas (gráfico de interação)."),
     P("medias.horizontal", False, "bool", "Orientação horizontal", "Médias"),
     P("medias.largura", 0.62, "num", "Largura das barras/caixas", "Médias", minimo=0.1, maximo=1, passo=0.02),
     P("medias.barra_alfa", 1.0, "num", "Opacidade do preenchimento", "Médias", minimo=0, maximo=1, passo=0.05),
     P("medias.barra_cor", "#E4D5C7", "cor", "Preenchimento das barras (série única)", "Médias"),
     P("medias.contorno_esp", 0.0, "num", "Contorno das barras/caixas (pt)", "Médias", minimo=0, maximo=3, passo=0.1),
     P("medias.contorno_cor", "#1A1A1A", "cor", "Cor do contorno", "Médias"),
+    P("medias.contorno_auto", False, "bool", "Contorno automático (tom mais escuro do preenchimento)", "Médias"),
     P("medias.hachuras", False, "bool", "Hachuras por grupo (impressão P&B)", "Médias"),
+    P("medias.hachura_esp", 0.6, "num", "Espessura das hachuras (pt)", "Médias", minimo=0.1, maximo=2, passo=0.05),
+    P("medias.rotulo_valor", False, "bool", "Mostrar o valor de cada média (rótulo de dados)", "Médias"),
+    P("medias.rotulo_decimais", -1, "int", "Casas decimais do rótulo (−1 = auto)", "Médias", minimo=-1, maximo=4, passo=1),
     P("medias.obs", True, "bool", "Mostrar observações individuais", "Médias"),
     P("medias.obs_tam", 7.0, "num", "Tamanho das observações (pt²)", "Médias", minimo=1, maximo=60, passo=1),
     P("medias.obs_alfa", 0.45, "num", "Transparência das observações", "Médias", minimo=0.05, maximo=1, passo=0.05),
@@ -174,6 +191,8 @@ PARAMS = [
     P("anot.colchetes", [], "lista", "Colchetes de significância", "Erros e letras"),
     P("anot.linhas", [], "lista", "Linhas de referência", "Erros e letras"),
     P("anot.textos", [], "lista", "Textos livres", "Erros e letras"),
+    P("anot.faixas", [], "lista", "Faixas sombreadas", "Erros e letras"),
+    P("anot.formas", [], "lista", "Setas e formas", "Erros e letras"),
     # ------------------------------------------------------------------ Legenda
     P("legenda.mostrar", True, "bool", "Mostrar legenda", "Legenda"),
     P("legenda.posicao", "automática", "escolha", "Posição", "Legenda", opcoes=POSICOES_LEGENDA),
@@ -190,7 +209,10 @@ PARAMS = [
     P("reg.r2_aj", False, "bool", "Usar R² ajustado", "Regressão"),
     P("reg.posicao", "automática", "escolha", "Posição das equações", "Regressão", opcoes=POSICOES_EQ),
     P("reg.digitos", 4, "int", "Algarismos significativos na equação", "Regressão", minimo=2, maximo=6, passo=1),
-    P("reg.banda", False, "bool", "Faixa de confiança de 95% da curva", "Regressão"),
+    P("reg.banda", False, "bool", "Faixa ao redor da curva", "Regressão"),
+    P("reg.banda_tipo", "confiança", "escolha", "Tipo de faixa", "Regressão", opcoes=["confiança", "predição", "ambas"],
+      ajuda="Confiança: incerteza da curva média. Predição: onde se espera uma nova observação (mais larga)."),
+    P("reg.banda_nivel", "95%", "escolha", "Nível da faixa", "Regressão", opcoes=["90%", "95%", "99%"]),
     P("reg.banda_alfa", 0.15, "num", "Opacidade da faixa", "Regressão", minimo=0.02, maximo=0.6, passo=0.01),
     P("reg.esp", 1.0, "num", "Espessura da curva (pt)", "Regressão", minimo=0.2, maximo=4, passo=0.1),
     P("reg.estender", 0.0, "num", "Estender a curva além dos dados (fração)", "Regressão", minimo=0, maximo=0.5, passo=0.05),
@@ -218,6 +240,10 @@ PARAMS = [
     P("painel.dy", 1.02, "num", "Posição vertical do rótulo", "Painel", minimo=0.8, maximo=1.3, passo=0.01),
     P("painel.wspace", 0.35, "num", "Espaço horizontal entre painéis", "Painel", minimo=0, maximo=1.5, passo=0.05),
     P("painel.hspace", 0.45, "num", "Espaço vertical entre painéis", "Painel", minimo=0, maximo=1.5, passo=0.05),
+    P("painel.mesma_escala_y", False, "bool", "Mesma escala de Y em todos os painéis", "Painel",
+      ajuda="Como o 'Merge Graphs' do OriginPro: facilita comparar painéis lado a lado"),
+    P("painel.ocultar_internos", False, "bool", "Ocultar números e título de Y nos painéis internos", "Painel",
+      ajuda="Só vale com a mesma escala de Y"),
 ]
 
 POR_CHAVE = {p.chave: p for p in PARAMS}
@@ -283,7 +309,7 @@ def diferencas(t: dict, base: dict | None = None) -> dict:
 
 
 def para_json(ajustes: dict, nome="Meu tema") -> str:
-    return json.dumps({"plataforma": "Estatística Experimental", "versao_tema": 1, "nome": nome,
+    return json.dumps({"plataforma": "Stat-Soil", "versao_tema": 1, "nome": nome,
                        "parametros": ajustes}, ensure_ascii=False, indent=2)
 
 
@@ -334,3 +360,56 @@ def rotulo_painel(estilo: str, i: int) -> str:
         return ""
     a, A = "abcdefghijklmnopqrstuvwxyz"[i % 26], "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[i % 26]
     return {"a": a, "A": A, "(a)": f"({a})", "(A)": f"({A})", "a)": f"{a})", "A.": f"{A}."}[estilo]
+
+
+# ----------------------------------------------------------------------------
+# Texto rico (códigos inspirados nos "escape codes" do OriginPro)
+# ----------------------------------------------------------------------------
+import re as _re
+
+_SUP = str.maketrans("0123456789+-−=()n", "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁻⁼⁽⁾ⁿ")
+_SUB = str.maketrans("0123456789+-−=()", "₀₁₂₃₄₅₆₇₈₉₊₋₋₌₍₎")
+_SUP_OK = set("0123456789+-−=()n")
+_SUB_OK = set("0123456789+-−=()")
+GREGO = {"alpha": "α", "beta": "β", "gamma": "γ", "Gamma": "Γ", "delta": "δ", "Delta": "Δ", "epsilon": "ε",
+         "zeta": "ζ", "eta": "η", "theta": "θ", "Theta": "Θ", "kappa": "κ", "lambda": "λ", "Lambda": "Λ",
+         "mu": "µ", "nu": "ν", "xi": "ξ", "pi": "π", "Pi": "Π", "rho": "ρ", "sigma": "σ", "Sigma": "Σ",
+         "tau": "τ", "phi": "φ", "Phi": "Φ", "chi": "χ", "psi": "ψ", "Psi": "Ψ", "omega": "ω", "Omega": "Ω",
+         "deg": "°", "pm": "±", "times": "×", "cdot": "·", "le": "≤", "ge": "≥", "permil": "‰"}
+
+
+def _mt(txt):
+    """Escapa texto para dentro de um bloco mathtext."""
+    return "".join("\\ " if c == " " else ("\\" + c if c in "{}%#&_^$" else c) for c in txt)
+
+
+def rico(s):
+    """Converte códigos simples em texto formatado:
+    ^{-1} ou ^-1 → sobrescrito · _{2} → subscrito · *Crotalaria* → itálico · \\alpha → α."""
+    if not isinstance(s, str) or not any(c in s for c in "^_\\*$"):
+        return s
+    s = s.replace("$", "\\$")
+    s = _re.sub(r"\\([A-Za-z]+)", lambda m: GREGO.get(m.group(1), m.group(0)), s)
+
+    def sup(m):
+        txt = m.group(1) if m.group(1) is not None else m.group(2)
+        if txt and set(txt) <= _SUP_OK:
+            return txt.translate(_SUP)
+        return "$^{\\mathregular{" + _mt(txt) + "}}$"
+
+    def sub(m):
+        txt = m.group(1)
+        if txt and set(txt) <= _SUB_OK:
+            return txt.translate(_SUB)
+        return "$_{\\mathregular{" + _mt(txt) + "}}$"
+
+    s = _re.sub(r"\^\{([^}]*)\}|\^([-−+]?[0-9]+)", sup, s)
+    s = _re.sub(r"_\{([^}]*)\}", sub, s)
+    s = _re.sub(r"\*([^*\s][^*]*?)\*", lambda m: "$\\mathit{" + _mt(m.group(1)) + "}$", s)
+    return s
+
+
+def nome_rico(t: dict, nivel) -> str:
+    """Nome exibido do nível; códigos de formatação valem apenas para nomes digitados pelo usuário."""
+    novo = t["niveis.renomear"].get(str(nivel))
+    return rico(novo) if novo else str(nivel)

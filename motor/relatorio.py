@@ -47,7 +47,9 @@ def _curva(f, rotulo, alfa, modelo=None):
     reg = f.regressao
     return fg.Curva(rotulo=rotulo, x=reg.x, medias=reg.medias, ep=f.ep_dados, dp=f.dp_dados, n=f.n,
                     obs_x=reg.obs_x, obs_y=reg.obs_y, modelo=modelo or reg.melhor,
-                    sig=f.p is not None and f.p < alfa)
+                    sig=f.p is not None and f.p < alfa, qm_erro=getattr(reg, "qm_erro", None),
+                    ajustes=[a for a in reg.ajustes if a.convergiu],
+                    chave=(f.fator, tuple(sorted(f.condicao.items()))))
 
 
 def specs_para(res, rotulo_y=None, perfil=None, grupo=None, idioma="pt"):
