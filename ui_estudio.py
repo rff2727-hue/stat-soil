@@ -2,7 +2,10 @@
 Estúdio de figuras: edição detalhada de cada figura, montagem de painéis e
 tema global. Os controles são gerados a partir do esquema motor.tema.PARAMS.
 """
+
 from __future__ import annotations
+
+REVISAO = "2.2.1"   # conferida pelo app.py para descartar módulos antigos em memória
 
 import copy
 import json

@@ -2,7 +2,10 @@
 Estado e utilidades compartilhadas da interface (temas por figura, catálogo
 de figuras, cache de prévias e tabelas com download em Excel/Word).
 """
+
 from __future__ import annotations
+
+REVISAO = "2.2.1"   # conferida pelo app.py para descartar módulos antigos em memória
 
 import hashlib
 import json

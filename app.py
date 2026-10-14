@@ -4,6 +4,29 @@ Python + motor determinístico + Streamlit; entrada e saída em Excel.
 """
 from __future__ import annotations
 
+import importlib  # noqa: E402
+import sys  # noqa: E402
+
+REVISAO = "2.2.1"
+_LOCAIS = ("estilo", "ui_comum", "ui_analises", "ui_estudio")
+
+
+def _descartar_modulos_antigos():
+    """Depois de uma atualização do código, o servidor (ex.: Streamlit Cloud) pode manter em memória versões
+    antigas dos módulos auxiliares. Se a revisão não confere, eles são descartados e importados de novo."""
+    antigos = [n for n in _LOCAIS if n in sys.modules and getattr(sys.modules[n], "REVISAO", None) != REVISAO]
+    motor = sys.modules.get("motor")
+    if motor is not None and getattr(motor, "__version__", None) != REVISAO:
+        antigos.append("motor")
+    if antigos:
+        for n in list(sys.modules):
+            if n in _LOCAIS or n == "motor" or n.startswith("motor."):
+                sys.modules.pop(n, None)
+        importlib.invalidate_caches()
+
+
+_descartar_modulos_antigos()
+
 import io
 import traceback
 from pathlib import Path
@@ -27,12 +50,30 @@ from ui_comum import (botoes_figura, catalogo, fmt_tabela, iniciar_estado, nova_
                       tabela_ui, tema_base)
 
 RAIZ = Path(__file__).resolve().parent
+_desatualizados = [m.__name__ for m in (estilo, ui_estudio, ua) if getattr(m, "REVISAO", None) != REVISAO]
+import ui_comum as _uc  # noqa: E402
+if getattr(_uc, "REVISAO", None) != REVISAO:
+    _desatualizados.append("ui_comum")
+if __version__ != REVISAO:
+    _desatualizados.append("motor")
+if _desatualizados:
+    st.error("Alguns arquivos da plataforma no servidor são de uma versão anterior: "
+             + ", ".join(f"{n}.py" if n != "motor" else "pasta motor/" for n in _desatualizados)
+             + f". Envie novamente todos os arquivos da versão {REVISAO} (inclusive as pastas .streamlit, static, "
+               "assets e motor) e reinicie o app (Manage app → Reboot).")
+    st.stop()
+_tema_mudou = estilo.aplicar_tema()
 st.set_page_config(page_title="Stat-Soil", page_icon=str(RAIZ / "assets" / "icone.png")
                    if (RAIZ / "assets" / "icone.png").exists() else None, layout="wide")
 
 # ============================================================================
 # Identidade visual
 # ============================================================================
+if _tema_mudou and not st.session_state.get("_tema_reaplicado"):
+    # primeira execução do servidor sem o config.toml: o tema recém-definido só chega ao navegador
+    # numa nova execução
+    st.session_state["_tema_reaplicado"] = True
+    st.rerun()
 estilo.aplicar()
 iniciar_estado()
 _topo = st.container()

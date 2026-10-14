@@ -1,4 +1,4 @@
-# Stat-Soil · v2.2
+# Stat-Soil · v2.2.1
 
 Plataforma web para análise estatística de experimentos agronômicos, no mesmo padrão da plataforma de
 recomendação de solo: **Python + motor determinístico + Streamlit**, entrada e saída em **Excel**, hospedagem
@@ -21,6 +21,13 @@ gratuita no **Streamlit Community Cloud**.
 | Planejamento | número de repetições pelo poder do teste F (F não central) e DMS de Tukey esperada a partir do CV |
 | Textos | rascunho automático de Material e Métodos e de Resultados (pt/en) |
 | Saídas | Excel com tabelas em padrão de periódico; **relatório Word completo** (Métodos, resultados, tabelas 1,0/0,5 pt e figuras com legenda); gráficos em PNG/TIFF 600 dpi, SVG editável e PDF; **arquivo de projeto .estatexp** para reabrir tudo depois |
+
+## Novidades da v2.2.1
+
+- Correção do erro `AttributeError` em `ajuste_rapido` no Streamlit Cloud (módulo antigo mantido em memória após a
+  atualização): a revisão de cada módulo é conferida e, se preciso, eles são recarregados.
+- Fontes e cores não dependem mais do `.streamlit/config.toml` nem da pasta `static/` estarem publicadas: o tema é
+  aplicado em tempo de execução e as fontes têm origem alternativa na internet e fontes de sistema sem serifa.
 
 ## Novidades da v2.2
 
@@ -110,14 +117,15 @@ python -m pytest -q        # testes de validação
 
 ## Publicar no Streamlit Community Cloud
 
-1. Crie um repositório no GitHub (ex.: `estatistica-experimental`) e envie o conteúdo desta pasta.
-2. Em <https://share.streamlit.io>, **Create app** → selecione o repositório, branch `main`, arquivo `app.py`.
-3. Em *Advanced settings*, escolha Python 3.11 ou 3.12. Deploy.
+1. Envie **todo** o conteúdo desta pasta ao repositório do GitHub, inclusive a pasta oculta `.streamlit/`
+   (no macOS ela não aparece no Finder: use ⌘ ⇧ . para mostrá-la, ou envie pelo GitHub Desktop / `git push`).
+   Ela liga o servidor de arquivos da pasta `static/`, de onde vêm as fontes.
+2. Em <https://share.streamlit.io>, **Create app** → repositório, branch `main`, arquivo `app.py`; Python 3.11 ou 3.12.
+3. Depois de cada atualização, use **Manage app → Reboot app**. A própria plataforma também confere a revisão dos
+   módulos e descarta versões antigas que o servidor tenha mantido em memória.
 
-Identidade visual: as logos ficam em `assets/` (`logo_completo.png`, `logo_emblema.png`, `logo_marca.png`,
-`icone.png`). As cores e fontes da interface estão em `.streamlit/config.toml` (o `server.enableStaticServing` precisa ficar
-ativo para as fontes embutidas); a paleta dos gráficos, em `motor/graficos.py`
-(`PALETA`, validada para daltonismo).
+Se a pasta `.streamlit/` ficar de fora, a plataforma continua com as cores certas (o tema é aplicado também em
+tempo de execução) e busca as fontes na internet (Google Fonts e jsDelivr); nunca cai numa fonte serifada.
 
 ## Validação
 

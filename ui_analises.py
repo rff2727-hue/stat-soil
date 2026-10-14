@@ -3,7 +3,10 @@ Seções de interface das análises complementares (v2.1): alternativas robustas
 exclusão de discrepantes, contrastes, MEE, análise conjunta, agrupamento,
 análise de trilha e planejamento de experimentos.
 """
+
 from __future__ import annotations
+
+REVISAO = "2.2.1"   # conferida pelo app.py para descartar módulos antigos em memória
 
 import numpy as np
 import pandas as pd
