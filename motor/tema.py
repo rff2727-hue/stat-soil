@@ -31,14 +31,43 @@ FONTES = {
 }
 
 PALETAS = {
+    # --- seguras para daltônicos
     "Solos do Cerrado": ["#A6461E", "#2878A8", "#D29A1C", "#3E8A45", "#8A4E9E", "#E0785A", "#1F9A9A", "#9A5A14"],
     "Okabe-Ito": ["#E69F00", "#56B4E9", "#009E73", "#0072B2", "#D55E00", "#CC79A7", "#F0E442", "#000000"],
-    "Terra suave": ["#8C3B1E", "#2E6E8E", "#C8912E", "#4F7942", "#7A5C8C", "#D46A43", "#1F3B4D", "#8A8A8A"],
-    "Tons de cinza": ["#1A1A1A", "#7A7A7A", "#B5B5B5", "#4A4A4A", "#9A9A9A", "#D0D0D0", "#2E2E2E", "#636363"],
+    "Tol brilhante": ["#4477AA", "#EE6677", "#228833", "#CCBB44", "#66CCEE", "#AA3377", "#BBBBBB"],
+    "Tol vibrante": ["#0077BB", "#EE7733", "#009988", "#CC3311", "#33BBEE", "#EE3377", "#BBBBBB"],
+    "Tol suave": ["#332288", "#88CCEE", "#44AA99", "#117733", "#999933", "#DDCC77", "#CC6677", "#882255", "#AA4499"],
+    "IBM": ["#648FFF", "#785EF0", "#DC267F", "#FE6100", "#FFB000", "#000000"],
     "Viridis": ["#440154", "#46327E", "#365C8D", "#277F8E", "#1FA187", "#4AC16D", "#9FDA3A", "#FDE725"],
-    "Clássica (tab10)": ["#1F77B4", "#FF7F0E", "#2CA02C", "#D62728", "#9467BD", "#8C564B", "#E377C2", "#7F7F7F"],
+    "Cividis": ["#00224E", "#213D6C", "#4D556C", "#6C6E72", "#8D8878", "#B1A570", "#D8C55C", "#FEE838"],
+    "Batlow": ["#001959", "#113F5F", "#22605F", "#4D734D", "#807E35", "#C0903F", "#F0A27B", "#FDB6BC"],
+    "Dark2 (ColorBrewer)": ["#1B9E77", "#D95F02", "#7570B3", "#E7298A", "#66A61E", "#E6AB02", "#A6761D", "#666666"],
+    "Tons de cinza": ["#1A1A1A", "#7A7A7A", "#B5B5B5", "#4A4A4A", "#9A9A9A", "#D0D0D0", "#2E2E2E", "#636363"],
+    # --- de periódicos e clássicas
+    "Terra suave": ["#8C3B1E", "#2E6E8E", "#C8912E", "#4F7942", "#7A5C8C", "#D46A43", "#1F3B4D", "#8A8A8A"],
     "Azul–terracota": ["#1D4E89", "#B5542C", "#5B8DB8", "#D9946C", "#0B2B4C", "#7A2E14", "#A9C4E0", "#F0C7A8"],
+    "Nature (NPG)": ["#E64B35", "#4DBBD5", "#00A087", "#3C5488", "#F39B7F", "#8491B4", "#91D1C2", "#DC0000"],
+    "Science (AAAS)": ["#3B4992", "#EE0000", "#008B45", "#631879", "#008280", "#BB0021", "#5F559B", "#A20056"],
+    "The Lancet": ["#00468B", "#ED0000", "#42B540", "#0099B4", "#925E9F", "#FDAF91", "#AD002A", "#ADB6B6"],
+    "JAMA": ["#374E55", "#DF8F44", "#00A1D5", "#B24745", "#79AF97", "#6A6599", "#80796B"],
+    "Set2 (ColorBrewer)": ["#66C2A5", "#FC8D62", "#8DA0CB", "#E78AC3", "#A6D854", "#FFD92F", "#E5C494", "#B3B3B3"],
+    "Clássica (tab10)": ["#1F77B4", "#FF7F0E", "#2CA02C", "#D62728", "#9467BD", "#8C564B", "#E377C2", "#7F7F7F"],
+    # --- sequenciais (doses, camadas, tempo)
+    "Laranjas (sequencial)": ["#FDD0A2", "#FDAE6B", "#FD8D3C", "#F16913", "#D94801", "#A63603", "#7F2704"],
+    "Azuis (sequencial)": ["#C6DBEF", "#9ECAE1", "#6BAED6", "#4292C6", "#2171B5", "#08519C", "#08306B"],
+    "Verdes (sequencial)": ["#C7E9C0", "#A1D99B", "#74C476", "#41AB5D", "#238B45", "#006D2C", "#00441B"],
+    "Terra (sequencial)": ["#F1DDC5", "#E3BE93", "#CF9A62", "#B5763D", "#8F5527", "#693A18", "#45240D"],
 }
+# paletas distinguíveis nas formas mais comuns de daltonismo
+DALTONICOS = {"Solos do Cerrado", "Okabe-Ito", "Tol brilhante", "Tol vibrante", "Tol suave", "IBM", "Viridis", "Cividis",
+              "Batlow", "Dark2 (ColorBrewer)", "Tons de cinza", "Laranjas (sequencial)", "Azuis (sequencial)",
+              "Verdes (sequencial)", "Terra (sequencial)"}
+GRUPOS_PALETAS = {"Seguras para daltônicos": ["Solos do Cerrado", "Okabe-Ito", "Tol brilhante", "Tol vibrante", "Tol suave",
+                                              "IBM", "Viridis", "Cividis", "Batlow", "Dark2 (ColorBrewer)", "Tons de cinza"],
+                  "Periódicos e clássicas": ["Terra suave", "Azul–terracota", "Nature (NPG)", "Science (AAAS)", "The Lancet",
+                                             "JAMA", "Set2 (ColorBrewer)", "Clássica (tab10)"],
+                  "Sequenciais (doses, camadas)": ["Laranjas (sequencial)", "Azuis (sequencial)", "Verdes (sequencial)",
+                                                   "Terra (sequencial)"]}
 
 MARCADORES = {"círculo": "o", "quadrado": "s", "triângulo": "^", "losango": "D", "triângulo invertido": "v",
               "pentágono": "p", "hexágono": "h", "estrela": "*", "cruz (+)": "P", "xis": "X"}
@@ -154,9 +183,16 @@ PARAMS = [
     P("niveis.ocultar", [], "lista", "Ocultar níveis", "Séries"),
     # ------------------------------------------------------------------ Médias
     P("medias.tipo", "pontos", "escolha", "Tipo de gráfico", "Médias",
-      opcoes=["pontos", "barras", "box", "meia-caixa", "violino", "meio-violino", "raincloud", "beeswarm", "linhas"],
-      ajuda="Meia-caixa/meio-violino: distribuição de um lado e dados do outro. Linhas: médias ligadas (gráfico de interação)."),
+      opcoes=["pontos", "barras", "pirulito", "box", "meia-caixa", "violino", "meio-violino", "raincloud", "beeswarm",
+              "linhas"],
+      ajuda="Pirulito: haste fina com ponto na média (bom para muitos tratamentos, ordenados). Meia-caixa/meio-violino: "
+            "distribuição de um lado e dados do outro. Linhas: médias ligadas (gráfico de interação)."),
+    P("medias.ordenar", "original", "escolha", "Ordenar tratamentos pela média", "Médias",
+      opcoes=["original", "crescente", "decrescente"]),
     P("medias.horizontal", False, "bool", "Orientação horizontal", "Médias"),
+    P("emp.modo", "valores", "escolha", "Barras empilhadas: escala", "Médias", opcoes=["valores", "percentual (100%)"]),
+    P("emp.rotulos", True, "bool", "Barras empilhadas: valor dentro de cada segmento", "Médias"),
+    P("emp.total", False, "bool", "Barras empilhadas: total acima da barra", "Médias"),
     P("medias.largura", 0.62, "num", "Largura das barras/caixas", "Médias", minimo=0.1, maximo=1, passo=0.02),
     P("medias.barra_alfa", 1.0, "num", "Opacidade do preenchimento", "Médias", minimo=0, maximo=1, passo=0.05),
     P("medias.barra_cor", "#E4D5C7", "cor", "Preenchimento das barras (série única)", "Médias"),
@@ -188,6 +224,13 @@ PARAMS = [
     P("letras.distancia", 0.035, "num", "Distância das letras (fração do eixo)", "Erros e letras", minimo=0, maximo=0.2, passo=0.005),
     P("letras.italico", False, "bool", "Letras em itálico", "Erros e letras"),
     P("letras.separar", False, "bool", "Separar minúscula e maiúscula com espaço (interações)", "Erros e letras"),
+    P("stats.subtitulo", False, "bool", "Resumo estatístico no topo (F, p, η²p, n)", "Erros e letras",
+      ajuda="Como no ggbetweenstats: o teste que sustenta a figura aparece escrito nela"),
+    P("stats.colchetes", "nenhum", "escolha", "Colchetes automáticos entre pares", "Erros e letras",
+      opcoes=["nenhum", "significativos", "todos"],
+      ajuda="Desenha colchetes com o valor de p de cada comparação do teste de médias (até 10 pares)"),
+    P("stats.colchete_texto", "estrelas", "escolha", "Texto dos colchetes automáticos", "Erros e letras",
+      opcoes=["estrelas", "valor de p"]),
     P("anot.colchetes", [], "lista", "Colchetes de significância", "Erros e letras"),
     P("anot.linhas", [], "lista", "Linhas de referência", "Erros e letras"),
     P("anot.textos", [], "lista", "Textos livres", "Erros e letras"),
@@ -196,6 +239,8 @@ PARAMS = [
     # ------------------------------------------------------------------ Legenda
     P("legenda.mostrar", True, "bool", "Mostrar legenda", "Legenda"),
     P("legenda.posicao", "automática", "escolha", "Posição", "Legenda", opcoes=POSICOES_LEGENDA),
+    P("legenda.direta", False, "bool", "Rótulos diretos na ponta das linhas (sem caixa de legenda)", "Legenda",
+      ajuda="Cada linha recebe o nome ao lado do último ponto, na cor da série"),
     P("legenda.colunas", 0, "int", "Colunas (0 = automático)", "Legenda", minimo=0, maximo=8, passo=1),
     P("legenda.titulo", True, "bool", "Mostrar título da legenda", "Legenda"),
     P("legenda.moldura", False, "bool", "Moldura", "Legenda"),

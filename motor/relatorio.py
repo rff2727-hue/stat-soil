@@ -125,9 +125,18 @@ def specs_para(res, rotulo_y=None, perfil=None, grupo=None, idioma="pt"):
             letras = f.comparacao.letras if f.comparacao.metodo != "dunnett" else \
                 [{"*": "*", "ns": "", "(controle)": ""}.get(L, "") for L in f.comparacao.letras]
         obs = f.obs[["nivel", "y_orig"]].rename(columns={"y_orig": "y"}) if f.obs is not None else None
+        estat = None
+        if f.f is not None and f.p is not None:
+            sq_ef, sq_er = f.f * f.gl_num * f.qm_erro, f.gl * f.qm_erro
+            estat = dict(f=float(f.f), gl1=f.gl_num, gl2=float(f.gl), p=float(f.p),
+                         eta2p=float(sq_ef / (sq_ef + sq_er)) if (sq_ef + sq_er) > 0 else None,
+                         n=int(np.nansum(f.n)), metodo=None)
+        pares = None
+        if f.comparacao is not None and f.comparacao.pares:
+            pares = [dict(g1=q["g1"], g2=q["g2"], p=q.get("p"), sig=bool(q.get("sig"))) for q in f.comparacao.pares]
         add(chave, "Médias — " + titulo,
             fg.SpecMedias(f.niveis, f.medias_orig, f.ep_dados, f.dp_dados, f.n, obs, letras, sig, _rot_x(fat), ry,
-                          titulo=cond))
+                          titulo=cond, estat=estat, pares=pares))
     ex = res.extras.get("todos_tratamentos")
     if ex:
         c = ex["comparacao"]

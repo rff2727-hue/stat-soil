@@ -1,4 +1,4 @@
-# Stat-Soil · v2.2.1
+# Stat-Soil · v3.0.0
 
 Plataforma web para análise estatística de experimentos agronômicos, no mesmo padrão da plataforma de
 recomendação de solo: **Python + motor determinístico + Streamlit**, entrada e saída em **Excel**, hospedagem
@@ -21,6 +21,23 @@ gratuita no **Streamlit Community Cloud**.
 | Planejamento | número de repetições pelo poder do teste F (F não central) e DMS de Tukey esperada a partir do CV |
 | Textos | rascunho automático de Material e Métodos e de Resultados (pt/en) |
 | Saídas | Excel com tabelas em padrão de periódico; **relatório Word completo** (Métodos, resultados, tabelas 1,0/0,5 pt e figuras com legenda); gráficos em PNG/TIFF 600 dpi, SVG editável e PDF; **arquivo de projeto .estatexp** para reabrir tudo depois |
+
+## Novidades da v3.0
+
+- **Edição por clique**: no Estúdio, passar o mouse destaca cada elemento da figura (eixos, títulos, legenda, letras,
+  equação, área do gráfico) e um clique abre só os controles dele. O modo avançado mantém todas as opções em abas.
+- **Galeria de estilos** com miniaturas da própria figura; **23 paletas** em três grupos (seguras para daltônicos,
+  periódicos, sequenciais) escolhidas pela faixa de cores.
+- **Novos gráficos**: pirulito, ordenação pela média, linha estatística (F, p, η²p), colchetes automáticos entre
+  médias, rótulos diretos no lugar da legenda e barras empilhadas de composição (valores ou 100%).
+- **Quadro de resultados** por variável (efeitos com barra de η² parcial, pressupostos com luzes, leitura rápida) e
+  visão geral de todas as variáveis. Novos testes: Lilliefors, D'Agostino-Pearson, Fligner-Killeen e Cochran.
+- **Pasta de figuras da sessão** com download em lote; aba “Pasta e downloads”.
+- **Downloads**: todo arquivo é gerado antes de o botão de baixar aparecer (fim do “Failed to generate file for
+  download”); Excel, Word, HTML e pacotes usam “Preparar” e depois “Baixar”.
+- **Relatórios**: Word reestruturado (capa, resumo, seções numeradas, pressupostos, paginação) e relatório em HTML
+  de arquivo único, imprimível em PDF.
+- **Explorador interativo** dos dados (Plotly) e tabela de dados fixa, com rolagem própria.
 
 ## Novidades da v2.2.1
 
@@ -76,7 +93,8 @@ gratuita no **Streamlit Community Cloud**.
 ```
 app.py                  interface Streamlit
 ui_comum.py             estado, catálogo de figuras, cache e tabelas na interface
-ui_estudio.py           Estúdio de figuras (figura, painel, tema global)
+ui_estudio.py           Estúdio de figuras (edição por clique, galeria, painel, tema global)
+ui_comp.py              componentes próprios: figura clicável e seletor de paletas (st.components.v2)
 ui_analises.py          seções das análises complementares (robustas, contrastes, MEE, conjunta, trilha…)
 motor/
   modelo.py             especificação do delineamento, validação e preparo dos dados
@@ -89,9 +107,11 @@ motor/
   misto.py              REML para dados multiestrato incompletos
   conjunta.py           análise conjunta de experimentos
   planejamento.py       poder e número de repetições
+  relatorio_blocos.py   estrutura do relatório (compartilhada por Word e HTML)
   relatorio_docx.py     relatório completo em Word
+  relatorio_html.py     relatório em HTML de arquivo único
   projeto.py            arquivo de projeto .estatexp
-  tema.py               esquema de ~130 parâmetros de estilo, presets e temas .json
+  tema.py               esquema de ~160 parâmetros de estilo, presets e temas .json
   figuras.py            motor gráfico v2 (especificações de dados + tema; painéis; exportação exata)
   tabelas.py            tabelas avulsas em Excel e Word no padrão de periódico
   graficos.py           registro de fontes (e funções da v1, mantidas por compatibilidade)
@@ -135,6 +155,8 @@ fórmulas de Banzatto & Kronka para o erro combinado de parcelas subdivididas (Q
 `tests/test_v21.py` valida Welch (statsmodels), Kruskal-Wallis e Friedman (SciPy), contrastes ortogonais (soma das
 SQ = SQ de tratamentos), análise conjunta (statsmodels), MEE (solução analítica), trilha (coeficientes padronizados),
 o modelo misto com parcela perdida e o arquivo de projeto (ida e volta exata).
+`tests/test_v30.py` cobre os novos gráficos, o mapa de regiões clicáveis, os novos testes de pressupostos e os
+relatórios em Word e HTML.
 
 ## Limitações atuais
 

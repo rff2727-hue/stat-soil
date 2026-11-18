@@ -7,8 +7,8 @@ from __future__ import annotations
 import importlib  # noqa: E402
 import sys  # noqa: E402
 
-REVISAO = "2.2.1"
-_LOCAIS = ("estilo", "ui_comum", "ui_analises", "ui_estudio")
+REVISAO = "3.0.0"
+_LOCAIS = ("estilo", "ui_comum", "ui_analises", "ui_estudio", "ui_comp")
 
 
 def _descartar_modulos_antigos():
@@ -36,7 +36,8 @@ import pandas as pd
 import streamlit as st
 
 from motor import __version__
-from motor import exportar, multivariada as mv, projeto, relatorio, relatorio_docx, templates, textos, tema as tm
+from motor import (exportar, figuras as fg, multivariada as mv, projeto, relatorio, relatorio_blocos, relatorio_docx,
+                   relatorio_html, templates, textos, tema as tm)
 from motor.anova import Opcoes, analisar
 from motor.comparacoes import METODOS
 from motor.exemplos import exemplo_para
@@ -45,12 +46,13 @@ from motor.modelo import (BASES, ESTRUTURAS, ErroDelineamento, Especificacao, Fa
 from motor.regressao import CATALOGO, FAMILIAS, modelos_da_familia
 import estilo
 import ui_analises as ua
+import ui_comp
 import ui_estudio
-from ui_comum import (botoes_figura, catalogo, fmt_tabela, iniciar_estado, nova_versao, previa, rotulo_item, ss,
-                      tabela_ui, tema_base)
+from ui_comum import (baixar_figura, botao_pasta, catalogo, fmt_tabela, gerar_e_baixar, guardar_na_pasta, hash_tema,
+                      iniciar_estado, nova_versao, previa, rotulo_item, ss, tabela_ui, tema_base, tema_figura, zip_pasta)
 
 RAIZ = Path(__file__).resolve().parent
-_desatualizados = [m.__name__ for m in (estilo, ui_estudio, ua) if getattr(m, "REVISAO", None) != REVISAO]
+_desatualizados = [m.__name__ for m in (estilo, ui_estudio, ua, ui_comp) if getattr(m, "REVISAO", None) != REVISAO]
 import ui_comum as _uc  # noqa: E402
 if getattr(_uc, "REVISAO", None) != REVISAO:
     _desatualizados.append("ui_comum")
@@ -183,7 +185,7 @@ with st.sidebar:
     estilo.dymo("Projeto", laranja=True)
     st.file_uploader("Abrir projeto (.estatexp)", type=["estatexp"], key="w_projeto", on_change=abrir_projeto,
                      help="Reabre dados, delineamento, opções, modelos escolhidos, exclusões e estilos das figuras. "
-                          "Salve o projeto na aba Downloads.")
+                          "Salve o projeto na aba Pasta e downloads.")
     if ss.get("_erro_projeto"):
         st.error(ss.pop("_erro_projeto"))
     st.caption(f"Motor v{__version__} · resultados determinísticos")
@@ -191,7 +193,7 @@ with st.sidebar:
 opcoes_base = dict(alfa=alfa, metodo=metodo, transformacao=transf, comparar_quantitativos=comparar_q,
                    alfa_interacao=alfa_int, modelos_regressao=modelos or None)
 
-ABAS = ["Dados e modelo", "Resultados", "Estúdio de figuras", "Multivariada", "Planejamento", "Downloads", "Guia"]
+ABAS = ["Dados e modelo", "Resultados", "Estúdio de figuras", "Multivariada", "Planejamento", "Pasta e downloads", "Guia"]
 aba_dados, aba_res, aba_est, aba_multi, aba_plan, aba_down, aba_guia = st.tabs(ABAS, key="aba", on_change="rerun")
 
 
@@ -417,7 +419,9 @@ if aba_dados.open:
                          "delineamento escolhido na barra lateral.")
         else:
             st.caption(f"{str(ss.nome_arquivo).replace(':None', '')} — {len(df)} linhas × {df.shape[1]} colunas")
-            st.dataframe(df.head(200), height=230, hide_index=True)
+            with st.container(height=268, border=False, key="tabela_dados"):
+                st.dataframe(df.head(5000), height=250, hide_index=True, width="stretch")
+            ua.explorar_dados(df)
             st.markdown("#### Mapeamento das colunas")
             try:
                 spec, livres = spec_da_interface(df)
@@ -467,14 +471,16 @@ def mostrar_figuras(itens, chave, colunas=2):
                     st.image(previa(it, idioma=idioma), width="stretch")
                 except Exception as e:
                     st.error(f"Erro ao desenhar: {e}")
-                b1, b2, b3 = st.columns([1.35, 1, 0.9])
+                b1, b2, b3, b4 = st.columns([1.3, 1.05, 0.8, 0.8])
                 b1.button("Editar no Estúdio", key=f"ed_{chave}_{it.id}", on_click=ir_para_estudio, args=(it.id,),
                           type="primary", width="stretch")
                 with b2:
                     ui_estudio.ajuste_rapido(it, idioma, chave)
                 with b3:
                     with st.popover("Baixar", width="stretch"):
-                        botoes_figura(it, idioma, chave, formatos=("png", "tiff", "svg", "pdf", "eps"), horizontal=False)
+                        baixar_figura(it, idioma, chave)
+                with b4:
+                    botao_pasta(it, idioma, chave)
 
 
 if aba_res.open:
@@ -483,6 +489,7 @@ if aba_res.open:
             estilo.vazio("Ainda não há resultados",
                          "Na aba Dados e modelo, confira o mapeamento das colunas e pressione Executar análise.")
         else:
+            ua.visao_geral(ss.resultados, idioma)
             chaves = list(ss.resultados)
             rotulo_ch = lambda k: k[1] + (f"  ·  {k[0]}" if k[0] else "")
             i_sel = st.selectbox("Variável", list(range(len(chaves))), format_func=lambda i: rotulo_ch(chaves[i]))
@@ -533,13 +540,23 @@ if aba_res.open:
 
                 ce = ss.config_exec or {}
                 sep_col = ce.get("separar") if ce.get("separar") not in (None, "(nenhuma)") else None
-                nomes_sub = ["ANOVA", "Médias e gráficos", "Regressão", "Pressupostos", "Contrastes", "Texto"]
+                nomes_sub = ["Quadro", "ANOVA", "Médias e gráficos", "Regressão", "Pressupostos", "Contrastes", "Texto"]
                 if sep_col:
-                    nomes_sub.insert(5, "Análise conjunta")
+                    nomes_sub.insert(6, "Análise conjunta")
                 subs = st.tabs(nomes_sub)
-                t_anova, t_med, t_reg, t_pres, t_ctr = subs[:5]
+                t_quadro, t_anova, t_med, t_reg, t_pres, t_ctr = subs[:6]
                 t_txt = subs[-1]
-                t_cj = subs[5] if sep_col else None
+                t_cj = subs[6] if sep_col else None
+                with t_quadro:
+                    ua.quadro_resultados(res, idioma)
+                    cat = catalogo(idioma)
+                    itens_q = [it for it in cat.values() if it.variavel == sel[1] and it.grupo == sel[0]
+                               and it.spec.tipo != "diagnostico"]
+                    if itens_q:
+                        titulo_secao(0, "Figuras desta variável")
+                        mostrar_figuras(itens_q[:2], f"qd_{i_sel}", 2)
+                        if len(itens_q) > 2:
+                            st.caption(f"Mais {len(itens_q) - 2} figura(s) na sub-aba Médias e gráficos.")
                 nota_sig = f"ns: p ≥ {str(alfa).replace('.', ',')}; * p < 0,05; ** p < 0,01; *** p < 0,001"
                 with t_anova:
                     titulo_secao(1, "Análise de variância")
@@ -708,10 +725,14 @@ if aba_res.open:
                             and it.spec.tipo == "diagnostico"]
                     for it in diag:
                         st.image(previa(it, idioma=idioma), width="stretch")
-                        c1, c2 = st.columns([1, 3])
-                        c1.button("Editar no Estúdio", key=f"ed_diag_{it.id}", on_click=ir_para_estudio, args=(it.id,))
+                        c1, c2, c3, _ = st.columns([1.3, 1, 1, 3])
+                        c1.button("Editar no Estúdio", key=f"ed_diag_{it.id}", on_click=ir_para_estudio, args=(it.id,),
+                                  width="stretch")
                         with c2:
-                            botoes_figura(it, idioma, "diag")
+                            with st.popover("Baixar", width="stretch"):
+                                baixar_figura(it, idioma, "diag")
+                        with c3:
+                            botao_pasta(it, idioma, "diag")
 
                 with t_ctr:
                     ua.secao_contrastes(res, sel, nome_base, f"{i_sel}")
@@ -755,7 +776,11 @@ if aba_multi.open:
                          and df[c].nunique() > 5]
             padrao = (ss.config_exec or {}).get("respostas") or numericas[:6]
             cat_todas = [c for c in df.columns if df[c].nunique() <= 60 and c not in numericas]
-            m_cor, m_ag, m_tr = st.tabs(["Correlações e PCA", "Agrupamento", "Análise de trilha"])
+            m_cor, m_ag, m_tr, m_emp = st.tabs(["Correlações e PCA", "Agrupamento", "Análise de trilha",
+                                                "Composição (barras empilhadas)"])
+            with m_emp:
+                ua.secao_composicao(df, [c for c in df.columns if pd.to_numeric(df[c], errors="coerce").notna().mean() > 0.8
+                                         and df[c].nunique() > 2], cat_todas, mostrar_figuras, idioma)
             with m_cor:
                 vs = st.multiselect("Variáveis", numericas, default=[v for v in padrao if v in numericas])
                 c1, c2, c3 = st.columns(3)
@@ -810,17 +835,66 @@ if aba_plan.open:
 
 
 # ============================================================================
-# Aba: Downloads
+# Aba: Pasta e downloads
 # ============================================================================
+def _remover_da_pasta(uid):
+    ss.pasta = [p for p in ss.pasta if p["uid"] != uid]
+
+
+def _guardar_todas():
+    for it in catalogo(idioma).values():
+        if it.spec.tipo != "diagnostico":
+            guardar_na_pasta(it, None, idioma)
+
+
+def _assinatura_estilos():
+    import json
+    return hash_tema({"g": ss.tema_global, "a": ss.ajustes, "p": ss.tema_preset, "r": ss.rotulos_y,
+                      "m": {str(k): {str(a): b for a, b in v.items()} for k, v in ss.modelo_escolhido.items()}})
+
+
 if aba_down.open:
     with aba_down:
+        titulo_secao(0, f"Pasta de figuras da sessão ({len(ss.pasta)})")
+        st.caption("Cada figura guardada com “＋ Pasta” fica aqui exatamente como estava naquele momento (dados, modelo "
+                   "e estilo). Baixe todas de uma vez, nos formatos que quiser.")
+        if not ss.pasta:
+            estilo.vazio("A pasta está vazia", "Use o botão “＋ Pasta” ao lado de qualquer figura, em Resultados ou no "
+                         "Estúdio, para reunir aqui as versões finais.")
+            if ss.resultados or ss.extras:
+                st.button("Guardar todas as figuras atuais na pasta", on_click=_guardar_todas, key="pasta_todas")
+        else:
+            por_linha = 5
+            for i in range(0, len(ss.pasta), por_linha):
+                cols = st.columns(por_linha)
+                for c, p in zip(cols, ss.pasta[i:i + por_linha]):
+                    with c:
+                        st.image(p["mini"], width="stretch")
+                        st.html(f"<div class='ss-pasta-nome' title='{p['titulo']}'>{p['nome']}</div>"
+                                f"<div class='ss-pasta-sub'>{p['titulo']} · {p['hora']}</div>")
+                        st.button("Remover", key=f"pasta_rm_{p['uid']}", on_click=_remover_da_pasta, args=(p["uid"],),
+                                  width="stretch")
+            f1, f2, f3 = st.columns([3, 2, 1.4], vertical_alignment="bottom")
+            fmts_p = f1.multiselect("Formatos do pacote", ["png", "tiff", "svg", "pdf", "eps"], default=["png", "pdf"],
+                                    key="pasta_fmts", format_func=lambda f: f.upper())
+            with f2:
+                if fmts_p:
+                    gerar_e_baixar(f"Preparar as {len(ss.pasta)} figuras (.zip)",
+                                   lambda: zip_pasta(ss.pasta, fmts_p), "figuras_stat_soil.zip", "application/zip",
+                                   "pasta_zip", assinatura=(tuple(p["uid"] for p in ss.pasta), tuple(fmts_p)))
+            if f3.button("Esvaziar pasta", key="pasta_limpar", width="stretch"):
+                ss.pasta = []
+                st.rerun()
+            if ss.resultados or ss.extras:
+                st.button("Guardar também todas as figuras atuais", on_click=_guardar_todas, key="pasta_todas")
+
         if not ss.resultados:
-            estilo.vazio("Nada para baixar ainda", "Execute a análise para gerar a planilha, o relatório, as figuras e o "
-                         "arquivo de projeto.")
+            st.caption("Execute a análise para liberar a planilha de resultados, os relatórios e o arquivo de projeto.")
         else:
             ce = ss.config_exec
             grupos_nomes = list(dict.fromkeys(k[0] for k in ss.resultados))
             extras_tab = list(ss.tabelas_extra.values())
+            ass_est = _assinatura_estilos()
             titulo_secao(1, "Planilha de resultados (Excel)")
             st.caption("ANOVA com tamanhos de efeito, médias com letras, desdobramentos, regressões ranqueadas, "
                        "pressupostos e alternativas robustas, descritiva, correlações/PCA, contrastes, MEE, análise "
@@ -833,23 +907,25 @@ if aba_down.open:
                     continue
                 dados_g = dict(ce["grupos"])[g]
                 nome = "resultados" + (f"_{relatorio._slug(g)}" if g else "") + ".xlsx"
-                cols_dl[n_g % len(cols_dl)].download_button(
-                    f"Excel{' — ' + g if g else ''}",
-                    data=(lambda r=res_g, e=erros, dg=dados_g, ex=dict(ss.extras), op=ce["opcoes"]: exportar.gerar_excel(
-                        r, op, idioma, extras={**ex, "erros": e, "tabelas": extras_tab},
-                        dados_brutos=dg, com_ep=com_ep)),
-                    file_name=nome, type="primary", width="stretch",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"xl_{g}")
+                with cols_dl[n_g % len(cols_dl)]:
+                    gerar_e_baixar(
+                        f"Preparar Excel{' — ' + g if g else ''}",
+                        (lambda r=res_g, e=erros, dg=dados_g: exportar.gerar_excel(
+                            r, ce["opcoes"], idioma, extras={**dict(ss.extras), "erros": e, "tabelas": extras_tab},
+                            dados_brutos=dg, com_ep=com_ep)),
+                        nome, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", f"xl_{g}",
+                        assinatura=(ss.versao, idioma, com_ep, len(extras_tab), ass_est))
 
-            titulo_secao(2, "Relatório completo (Word)")
-            st.caption("Material e Métodos, interpretação de cada variável, ANOVA e médias no padrão de periódico "
-                       "(filetes 1,0/0,5 pt), figuras com legenda numerada e as análises complementares calculadas.")
+            titulo_secao(2, "Relatório completo (Word e HTML)")
+            st.caption("Capa com a ficha da análise, resumo de todas as variáveis, Material e Métodos e, para cada "
+                       "variável, interpretação, ANOVA, médias, regressões, pressupostos e figuras numeradas, com tabelas "
+                       "no padrão de periódico (filetes 1,0/0,5 pt). O HTML é um arquivo único com sumário clicável, que "
+                       "abre em qualquer navegador e sai em PDF pelo botão Imprimir.")
             r1, r2, r3 = st.columns([3, 2, 2])
             tit_rel = r1.text_input("Título do relatório", value="Relatório de análise estatística", key="rel_tit")
             incl_fig = r2.toggle("Incluir figuras", value=True, key="rel_fig")
             fonte_rel = r3.selectbox("Fonte do documento", ["Roboto", "Arial", "Calibri", "Times New Roman"],
                                      key="rel_fonte")
-            from ui_comum import tema_figura
             cols_rel = st.columns(3)
             for n_g, g in enumerate(grupos_nomes):
                 res_g = [r for (gg, v), r in ss.resultados.items() if gg == g and not isinstance(r, Exception)]
@@ -858,56 +934,61 @@ if aba_down.open:
                 cat = catalogo(idioma)
                 itens_g = [it for it in cat.values() if it.grupo == g and it.variavel != "Multivariada"]
                 temas_g = {it.id: tema_figura(it.id, it.spec.tipo) for it in itens_g}
-                nome = "relatorio" + (f"_{relatorio._slug(g)}" if g else "") + ".docx"
-                cols_rel[n_g % len(cols_rel)].download_button(
-                    f"Word{' — ' + g if g else ''}",
-                    data=(lambda r=res_g, it=itens_g, gg=g, tg=temas_g, op=ce["opcoes"]: relatorio_docx.gerar_relatorio(
-                        r, op, it, lambda x: tg[x.id], idioma, fonte_rel,
-                        tit_rel + (f" — {gg}" if gg else ""), incl_fig, com_ep, extras={"tabelas": extras_tab})),
-                    file_name=nome, type="primary", width="stretch",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", key=f"doc_{g}")
+                suf = f"_{relatorio._slug(g)}" if g else ""
+                args_rel = (res_g, ce["opcoes"], itens_g, lambda x, tg=temas_g: tg[x.id], idioma, fonte_rel,
+                            tit_rel + (f" — {g}" if g else ""), incl_fig, com_ep)
+                ass = (ss.versao, idioma, com_ep, len(extras_tab), ass_est, tit_rel, incl_fig, fonte_rel)
+                with cols_rel[n_g % len(cols_rel)]:
+                    gerar_e_baixar(f"Preparar Word{' — ' + g if g else ''}",
+                                   lambda a=args_rel: relatorio_docx.gerar_relatorio(*a, extras={"tabelas": extras_tab}),
+                                   f"relatorio{suf}.docx",
+                                   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                   f"doc_{g}", assinatura=ass)
+                    gerar_e_baixar(f"Preparar HTML{' — ' + g if g else ''}",
+                                   lambda a=args_rel: relatorio_html.gerar_relatorio_html(*a, extras={"tabelas": extras_tab}),
+                                   f"relatorio{suf}.html", "text/html", f"html_{g}", assinatura=ass)
 
-            titulo_secao(3, "Pacote de figuras")
-            st.caption("Cada figura sai com o tema global e os ajustes feitos no Estúdio.")
-            formatos = st.multiselect("Formatos", ["png", "tiff", "svg", "pdf", "eps"], default=["png", "svg"],
+            titulo_secao(3, "Todas as figuras da análise")
+            st.caption("Pacote com todas as figuras no estado atual (tema global e ajustes do Estúdio), organizadas por "
+                       "formato. Para escolher só algumas, use a pasta no alto desta página.")
+            z1, z2, z3 = st.columns([3, 2, 2], vertical_alignment="bottom")
+            formatos = z1.multiselect("Formatos", ["png", "tiff", "svg", "pdf", "eps"], default=["png", "svg"],
+                                      format_func=lambda f: f.upper(),
                                       help="PNG e TIFF na resolução do tema (TIFF com LZW, RGB ou CMYK); SVG e EPS com "
                                            "texto editável ou em contornos; PDF vetorial com fontes embutidas.")
-            incl_diag = st.toggle("Incluir gráficos de diagnóstico dos resíduos", value=False)
-            if st.button("Gerar pacote (.zip)", key="gerar_zip"):
-                from ui_comum import tema_figura
+            incl_diag = z2.toggle("Incluir diagnósticos dos resíduos", value=False)
+
+            def _zip_todas():
                 import zipfile
-                from motor import figuras as fg
                 cat = catalogo(idioma)
                 buf = io.BytesIO()
-                barra = st.progress(0.0, text="Gerando figuras…")
                 itens = [it for it in cat.values() if incl_diag or it.spec.tipo != "diagnostico"]
                 with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-                    for n_, it in enumerate(itens):
+                    for it in itens:
                         t = tema_figura(it.id, it.spec.tipo)
                         pasta = relatorio._slug(it.grupo) + "/" if it.grupo else ""
                         for fmt in formatos:
                             z.writestr(f"{pasta}{fmt}/{it.nome}.{fmt}", fg.gerar_arquivo(it.spec, t, fmt, idioma))
-                        barra.progress((n_ + 1) / max(len(itens), 1), text=f"{it.titulo}")
                     z.writestr("tema_global.json", tm.para_json({**tm.PRESETS.get(ss.tema_preset, {}), **ss.tema_global}))
-                barra.empty()
-                ss.zip_figs = buf.getvalue()
-            if ss.get("zip_figs"):
-                st.download_button("Baixar figuras (.zip)", ss.zip_figs, file_name="figuras.zip", mime="application/zip")
+                return buf.getvalue()
+            with z3:
+                if formatos:
+                    gerar_e_baixar("Preparar pacote (.zip)", _zip_todas, "figuras.zip", "application/zip", "zip_todas",
+                                   assinatura=(ss.versao, idioma, ass_est, tuple(formatos), incl_diag))
 
             titulo_secao(4, "Projeto")
             st.caption("Um único arquivo com os dados, o delineamento, as opções, os modelos escolhidos, as exclusões e "
                        "todos os estilos de figura. Reabra pela barra lateral (Projeto) para continuar de onde parou.")
             nome_proj = relatorio._slug(str(ss.nome_arquivo or "projeto").split(":")[0].rsplit(".", 1)[0]) or "projeto"
-
-            # valores capturados agora: o download roda fora da sessão (sem acesso ao session_state)
             cfg_p = dict(spec=ce["spec"], opcoes=ce["opcoes"], separar=ce.get("separar"), respostas=ce["respostas"])
             est_p = {k: ss.get(k) for k in ("transf_var", "modelo_escolhido", "rotulos_y", "tema_preset",
                                             "tema_global", "ajustes", "painel_cfg", "painel_tema", "excluir")}
-
-            def _bytes_projeto(df_=ss.df, nome_=ss.nome_arquivo, cfg_=cfg_p, est_=est_p):
-                return projeto.salvar(df_, nome_, cfg_, est_)
-            st.download_button("Salvar projeto (.estatexp)", data=_bytes_projeto, file_name=f"{nome_proj}.estatexp",
-                               mime="application/zip", type="primary", key="dl_proj")
+            try:
+                st.download_button("Salvar projeto (.estatexp)", data=projeto.salvar(ss.df, ss.nome_arquivo, cfg_p, est_p),
+                                   file_name=f"{nome_proj}.estatexp", mime="application/zip", type="primary",
+                                   key="dl_proj", on_click="ignore")
+            except Exception as e:
+                st.error(f"Não foi possível montar o arquivo de projeto: {e}")
 
 
 # ============================================================================
@@ -916,6 +997,27 @@ if aba_down.open:
 if aba_guia.open:
     with aba_guia:
         st.markdown("""
+#### Novidades da versão 3.0
+- **Clique na figura para ajustá-la.** No Estúdio, passe o mouse sobre a prévia: eixos, títulos, legenda, letras,
+  equação e área do gráfico se destacam; um clique abre só os controles daquele elemento. As cerca de 160 opções
+  continuam disponíveis em “Todas as opções em abas (modo avançado)”.
+- **Galeria de estilos**: a sua figura, com os seus dados, em miniaturas de outros formatos (barras, pirulito
+  ordenado, box, raincloud, violino com estatística…). Um clique aplica; Desfazer volta atrás.
+- **Paletas com as cores à mostra**: 23 paletas em três grupos (seguras para daltônicos, periódicos e clássicas,
+  sequenciais para doses e camadas), escolhidas pela faixa de cores.
+- **Novos gráficos**: pirulito, ordenação pela média, linha com o teste F e o tamanho de efeito sobre a figura,
+  colchetes automáticos entre médias (estrelas ou valor de p), rótulos diretos no lugar da legenda e barras
+  empilhadas de composição (Multivariada → Composição), em valores ou 100%.
+- **Quadro de resultados**: efeitos com barra de η² parcial e veredito, pressupostos com luzes (agora também
+  Lilliefors, D'Agostino-Pearson, Fligner-Killeen e Cochran) e leitura rápida das médias; acima, a visão geral
+  de todas as variáveis.
+- **Pasta de figuras**: “＋ Pasta” guarda a figura como está; em Pasta e downloads, baixe todas de uma vez.
+- **Downloads confiáveis**: cada arquivo é preparado antes de o botão de baixar aparecer.
+- **Relatórios**: Word com capa, resumo geral, seções numeradas, pressupostos e número de página; e um relatório
+  em HTML (arquivo único, com sumário) que sai em PDF pelo botão Imprimir.
+- **Explorar os dados com o mouse** (aba Dados e modelo): gráfico interativo que mostra a linha da planilha de
+  cada ponto e lista as observações selecionadas.
+
 #### Delineamentos suportados
 | Estrutura | DIC | DBC | DQL |
 |---|---|---|---|
@@ -929,8 +1031,9 @@ if aba_guia.open:
 #### O que o motor faz
 - **ANOVA** com somas de quadrados exatas; médias ajustadas e SQ tipo III em delineamentos de um estrato (aceita
   parcelas perdidas); cada efeito testado contra o erro do seu estrato em parcelas subdivididas e faixas.
-- **Pressupostos**: Shapiro-Wilk, Anderson-Darling, Bartlett, Levene/Brown-Forsythe, não aditividade de Tukey,
-  resíduos studentizados e Box-Cox.
+- **Pressupostos**: Shapiro-Wilk, Anderson-Darling, Lilliefors e D'Agostino-Pearson (normalidade); Bartlett,
+  Levene/Brown-Forsythe, Fligner-Killeen e Cochran (homogeneidade); não aditividade de Tukey, resíduos
+  studentizados e Box-Cox.
 - **Testes de médias**: Tukey (Tukey-Kramer), Scott-Knott, LSD, Duncan, SNK, Bonferroni e Dunnett, com desdobramento
   automático das interações (erro combinado e GL de Satterthwaite quando cruza estratos).
 - **Regressão** (fatores quantitativos), em quatro famílias:
@@ -949,7 +1052,7 @@ Cada figura pode ser ajustada em detalhe, com prévia ao vivo no tamanho exato e
 - **Ajuste rápido** (ao lado de cada gráfico em Resultados e na barra do Estúdio): tipo de gráfico, valores
   individuais ligados ou desligados, barra de erro, letras, paleta, largura e — nas regressões — o **modelo ajustado**
   de cada curva e a faixa de confiança/predição.
-- **Tipos de gráfico de médias**: pontos, barras, box, meia-caixa + dados, violino, meio-violino + dados, raincloud,
+- **Tipos de gráfico de médias**: pontos, barras, pirulito, box, meia-caixa + dados, violino, meio-violino + dados, raincloud,
   beeswarm e linhas (gráfico de interação). Rótulos com o valor das médias, contorno automático, hachuras com
   espessura ajustável.
 - **Eixos**: escalas linear, log10, log2, ln e raiz quadrada; divisão por 10ⁿ com “(×10ⁿ)” no título; separador de
@@ -986,7 +1089,7 @@ A plataforma tem dois temas — painel grafite (escuro) e bancada bege (claro) �
 - **Multivariada**: agrupamento hierárquico (UPGMA, Ward…; corte de Mojena; dendrograma editável no Estúdio) e
   análise de trilha (efeitos diretos e indiretos, VIF, número de condição, opção em crista).
 - **Planejamento**: repetições necessárias para um poder desejado e DMS esperada, a partir do CV.
-- **Relatório Word** e **arquivo de projeto** na aba Downloads; o projeto reabre pela barra lateral.
+- **Relatórios (Word e HTML)** e **arquivo de projeto** na aba Pasta e downloads; o projeto reabre pela barra lateral.
 
 #### Tabelas
 Toda tabela tem botões **Excel** e **Word** no padrão de periódico: filetes de 1,0 pt acima e abaixo, 0,5 pt sob o

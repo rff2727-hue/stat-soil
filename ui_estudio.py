@@ -5,7 +5,7 @@ tema global. Os controles são gerados a partir do esquema motor.tema.PARAMS.
 
 from __future__ import annotations
 
-REVISAO = "2.2.1"   # conferida pelo app.py para descartar módulos antigos em memória
+REVISAO = "3.0.0"   # conferida pelo app.py para descartar módulos antigos em memória
 
 import copy
 import json
@@ -14,8 +14,9 @@ import pandas as pd
 import streamlit as st
 
 from motor import figuras as fg, tema as tm
-from ui_comum import (MIMES, ROT_FMT, botoes_figura, catalogo, hash_tema, nova_versao, previa, rotulo_item, ss,
-                      tema_base, tema_figura)
+import ui_comp
+from ui_comum import (MIMES, ROT_FMT, baixar_figura, botao_pasta, catalogo, hash_tema, nova_versao, previa, rotulo_item,
+                      ss, tema_base, tema_figura)
 from motor.regressao import CATALOGO
 
 ABAS_POR_TIPO = {
@@ -27,10 +28,20 @@ ABAS_POR_TIPO = {
     "dendrograma": ["Tela", "Fontes", "Eixos", "Séries"],
     "pca": ["Tela", "Fontes", "Eixos", "Séries", "Multivariada", "Legenda"],
     "diagnostico": ["Tela", "Fontes", "Eixos", "Séries", "Médias", "Painel"],
+    "empilhado": ["Tela", "Fontes", "Eixos", "Séries", "Médias", "Legenda"],
 }
 # parâmetros irrelevantes por tipo (para enxugar a interface)
 _SO_BARRAS = {"medias.rotulo_valor", "medias.rotulo_decimais", "medias.contorno_auto", "medias.hachura_esp"}
+_EMP = {"emp.modo", "emp.rotulos", "emp.total"}
+_ESTAT = {"stats.subtitulo", "stats.colchetes", "stats.colchete_texto"}
 OCULTAR = {
+    "empilhado": {"medias.tipo", "medias.ordenar", "medias.obs", "medias.obs_tam", "medias.obs_alfa", "medias.obs_disp",
+                  "medias.obs_lado", "medias.obs_cor", "medias.espaco_grupos", "medias.conectar", "medias.barra_cor",
+                  "medias.rotulo_valor", "series.colorir_niveis", "series.cor_unica", "series.marcador_tam",
+                  "series.marcador_borda", "series.marcador_borda_cor", "series.vazados", "series.variar_marcador",
+                  "series.linha_esp", "series.variar_linha", "eixos.x_escala", "eixos.x_min", "eixos.x_max",
+                  "eixos.x_passo", "eixos.x_decimais", "eixos.quebra_de", "eixos.quebra_ate", "eixos.y_log",
+                  "eixos.y_escala", "eixos.linha_media", "legenda.direta"} | _ESTAT,
     "regressao": {"medias.tipo", "medias.horizontal", "medias.largura", "medias.barra_alfa", "medias.barra_cor",
                   "medias.contorno_esp", "medias.contorno_cor", "medias.hachuras", "medias.obs_lado",
                   "medias.espaco_grupos", "medias.conectar", "letras.mostrar", "letras.se_ns", "letras.posicao",
@@ -50,13 +61,19 @@ OCULTAR = {
                     "series.vazados", "series.variar_marcador", "series.variar_linha"},
 }
 # opções de tipo de gráfico válidas para cada figura
-TIPOS_VALIDOS = {"medias": ["pontos", "barras", "box", "meia-caixa", "violino", "meio-violino", "raincloud", "beeswarm",
-                            "linhas"],
+TIPOS_VALIDOS = {"medias": ["pontos", "barras", "pirulito", "box", "meia-caixa", "violino", "meio-violino", "raincloud",
+                            "beeswarm", "linhas"],
                  "grupos": ["pontos", "barras", "box", "linhas"]}
 # o que fica de fora ao copiar/colar formato (específico dos dados de cada figura)
 NAO_COPIAR = ("eixos.y_min", "eixos.y_max", "eixos.y_passo", "eixos.x_min", "eixos.x_max", "eixos.x_passo",
               "eixos.rotulo_x", "eixos.rotulo_y", "eixos.quebra_de", "eixos.quebra_ate", "tela.titulo")
 HIST_MAX = 40
+for _t in ("medias", "grupos", "regressao", "perfil", "pca", "dendrograma", "correlacao", "diagnostico"):
+    OCULTAR.setdefault(_t, set()).update(_EMP)
+    if _t != "medias":
+        OCULTAR[_t].update(_ESTAT | {"medias.ordenar"})
+for _t in ("medias", "correlacao", "pca", "dendrograma", "diagnostico", "empilhado"):
+    OCULTAR.setdefault(_t, set()).add("legenda.direta")
 
 
 # ============================================================================
@@ -435,10 +452,12 @@ RAPIDOS = {
     "correlacao": ["cor.triangulo", "cor.valores", "cor.paleta", "tela.largura_mm"],
     "dendrograma": ["series.paleta", "series.linha_esp", "tela.largura_mm"],
     "diagnostico": ["series.cor_unica", "medias.obs_alfa", "tela.largura_mm"],
+    "empilhado": ["emp.modo", "emp.rotulos", "medias.horizontal", "series.paleta", "tela.largura_mm"],
 }
 ROTULOS_RAPIDOS = {"medias.obs": "Valores individuais", "medias.tipo": "Tipo de gráfico", "erro.tipo": "Barra de erro",
                    "letras.mostrar": "Letras", "series.paleta": "Paleta", "tela.largura_mm": "Largura (mm)",
-                   "reg.banda": "Faixa da curva", "reg.banda_tipo": "Tipo de faixa", "reg.equacao": "Equação"}
+                   "reg.banda": "Faixa da curva", "reg.banda_tipo": "Tipo de faixa", "reg.equacao": "Equação",
+                   "emp.modo": "Escala", "emp.rotulos": "Valores nas barras", "medias.horizontal": "Horizontal"}
 
 
 def barra_rapida(it, t, prefixo="rap", vertical=False):
@@ -456,7 +475,8 @@ def barra_rapida(it, t, prefixo="rap", vertical=False):
 # ============================================================================
 def secao_formato(it, cat, t):
     sp = it.spec
-    with st.expander("Copiar e colar formato entre figuras"):
+    st.markdown("**Copiar e colar formato entre figuras**")
+    if True:
         st.caption("Leva o formato desta figura (como está na prévia) para outras figuras, escolhendo quais partes. "
                    "Limites dos eixos, títulos e quebra de eixo ficam de fora, pois dependem dos dados.")
         partes_ok = [a for a in tm.ABAS if a not in ("Painel", "Multivariada")]
@@ -491,18 +511,299 @@ def secao_formato(it, cat, t):
 
 
 # ============================================================================
-# Modo figura
+# Modo figura — clicar no elemento da figura para ajustá-lo
 # ============================================================================
+ELEMENTOS = {"dados": "Gráfico", "eixo_y": "Eixo Y", "eixo_x": "Eixo X", "titulos": "Títulos", "legenda": "Legenda",
+             "letras": "Letras", "equacao": "Equação", "estat": "Estatística", "tela": "Tamanho e fontes"}
+REG_ELEM = {"titulo_y": "titulos", "titulo_x": "titulos", "titulo": "titulos"}
+ELEM_POR_TIPO = {
+    "medias": ["dados", "eixo_y", "eixo_x", "titulos", "letras", "estat", "legenda", "tela"],
+    "grupos": ["dados", "eixo_y", "eixo_x", "titulos", "legenda", "letras", "tela"],
+    "regressao": ["dados", "equacao", "eixo_y", "eixo_x", "titulos", "legenda", "tela"],
+    "perfil": ["dados", "eixo_x", "eixo_y", "titulos", "legenda", "tela"],
+    "pca": ["dados", "eixo_y", "eixo_x", "legenda", "tela"],
+    "correlacao": ["dados", "tela"],
+    "dendrograma": ["dados", "titulos", "tela"],
+    "diagnostico": ["dados", "tela"],
+    "empilhado": ["dados", "eixo_y", "eixo_x", "titulos", "legenda", "tela"],
+}
+DICAS_ELEM = {
+    "dados": "Tipo de gráfico, valores individuais, barras de erro, cores e marcadores.",
+    "eixo_y": "Limites, intervalo entre marcas, casas decimais, escala e quebra do eixo.",
+    "eixo_x": "Limites e escala (fatores quantitativos), rotação e nomes dos níveis.",
+    "titulos": "Textos dos eixos e do título, com sobrescritos, subscritos e itálico.",
+    "legenda": "Posição, colunas, moldura, rótulos diretos e a cor de cada grupo.",
+    "letras": "Letras do teste de médias, valores sobre as barras e anotações.",
+    "equacao": "Modelo de cada curva, equação, R² e posição do texto.",
+    "estat": "Linha com o teste F e o tamanho de efeito; colchetes entre médias.",
+    "tela": "Largura e altura em mm, resolução, família e tamanho das fontes, moldura dos eixos.",
+}
+# principais | demais (expansor "Mais opções")
+_DADOS = {
+    "medias": (["medias.tipo", "medias.obs", "erro.tipo", "medias.ordenar", "medias.horizontal", "series.colorir_niveis"],
+               ["series.cor_unica", "series.marcador_tam", "medias.obs_tam", "medias.obs_alfa", "medias.obs_disp",
+                "medias.largura", "medias.barra_alfa", "medias.hachuras", "medias.contorno_esp", "erro.esp", "erro.chapeu",
+                "erro.so_superior"]),
+    "grupos": (["medias.tipo", "medias.obs", "erro.tipo", "medias.conectar", "legenda.direta", "series.variar_marcador"],
+               ["series.marcador_tam", "series.linha_esp", "medias.obs_tam", "medias.obs_alfa", "medias.largura",
+                "medias.barra_alfa", "medias.hachuras", "medias.espaco_grupos", "erro.esp", "erro.chapeu"]),
+    "regressao": (["medias.obs", "erro.tipo", "reg.banda", "reg.banda_tipo", "reg.esp", "series.marcador_tam"],
+                  ["reg.banda_nivel", "reg.banda_alfa", "medias.obs_tam", "medias.obs_alfa", "series.variar_marcador",
+                   "series.variar_linha", "series.vazados", "reg.marcar_ponto", "reg.estender", "legenda.direta",
+                   "erro.esp", "erro.chapeu"]),
+    "perfil": (["erro.tipo", "legenda.direta", "series.marcador_tam", "series.linha_esp"],
+               ["series.variar_marcador", "series.variar_linha", "series.vazados", "erro.esp", "erro.chapeu"]),
+    "pca": (["pca.elipses", "pca.setas", "pca.tam_pontos", "pca.setas_cor", "pca.eixo_x", "pca.eixo_y"], []),
+    "correlacao": (["cor.triangulo", "cor.valores", "cor.estrelas", "cor.decimais", "cor.paleta"], []),
+    "dendrograma": (["series.linha_esp", "series.cor_unica"], []),
+    "diagnostico": (["series.cor_unica", "medias.obs_alfa", "medias.obs_tam"], []),
+    "empilhado": (["emp.modo", "emp.rotulos", "emp.total", "medias.horizontal", "medias.largura", "medias.barra_alfa"],
+                  ["medias.contorno_esp", "medias.contorno_cor", "medias.hachuras", "erro.esp", "erro.chapeu"]),
+}
+_CTX = {
+    "eixo_y": (["eixos.y_min", "eixos.y_max", "eixos.y_passo", "eixos.y_decimais", "eixos.y_escala", "fonte.numeros"],
+               ["eixos.y_fator", "eixos.quebra_de", "eixos.quebra_ate", "eixos.linha_media", "eixos.linha_zero",
+                "eixos.milhar", "eixos.decimal", "eixos.marcas_menores"]),
+    "eixo_x": (["eixos.x_min", "eixos.x_max", "eixos.x_passo", "eixos.x_decimais", "eixos.x_rotacao", "fonte.numeros"],
+               ["eixos.x_escala", "eixos.marcas_direcao", "eixos.marcas_comp"]),
+    "titulos": (["eixos.rotulo_y", "eixos.rotulo_x", "tela.titulo", "fonte.titulo_eixo"],
+                ["fonte.peso_titulos", "fonte.italico_titulos", "eixos.pad_titulo"]),
+    "legenda": (["legenda.mostrar", "legenda.direta", "legenda.posicao", "legenda.colunas", "fonte.legenda",
+                 "legenda.moldura"],
+                ["legenda.titulo", "legenda.comp_simbolo", "legenda.espaco", "legenda.dx", "legenda.dy"]),
+    "letras": (["letras.mostrar", "letras.se_ns", "letras.posicao", "fonte.letras", "letras.distancia", "letras.italico"],
+               ["letras.separar", "medias.rotulo_valor", "medias.rotulo_decimais"]),
+    "equacao": (["reg.equacao", "reg.r2", "reg.posicao", "fonte.equacao", "reg.digitos", "reg.r2_aj"],
+                ["reg.media_ns", "reg.estender", "reg.marcar_ponto"]),
+    "estat": (["stats.subtitulo", "stats.colchetes", "stats.colchete_texto"], []),
+    "tela": (["tela.largura_mm", "tela.altura_mm", "fonte.familia", "fonte.tamanho", "tela.dpi", "eixos.espessura"],
+             ["tela.proporcao", "eixos.superior", "eixos.direita", "eixos.marcas_direcao", "eixos.cor", "fonte.cor",
+              "tela.fundo", "tela.transparente", "tela.margem", "tela.svg_texto", "tela.tiff_cor"]),
+}
+_COM_PALETA = ("medias", "grupos", "regressao", "perfil", "pca", "dendrograma", "empilhado")
+
+# Galeria: a mesma figura em estilos prontos (um clique)
+RECEITAS = {
+    "medias": [
+        ("Pontos e dados", {"medias.tipo": "pontos", "medias.obs": True}),
+        ("Barras", {"medias.tipo": "barras", "medias.obs": False}),
+        ("Barras e dados", {"medias.tipo": "barras", "medias.obs": True, "medias.barra_alfa": 0.55}),
+        ("Pirulito ordenado", {"medias.tipo": "pirulito", "medias.ordenar": "decrescente", "medias.obs": False}),
+        ("Box e dados", {"medias.tipo": "box", "medias.obs": True}),
+        ("Raincloud", {"medias.tipo": "raincloud", "medias.obs": True}),
+        ("Violino estatístico", {"medias.tipo": "violino", "medias.obs": True, "stats.subtitulo": True,
+                                 "stats.colchetes": "significativos", "letras.mostrar": False}),
+        ("Beeswarm", {"medias.tipo": "beeswarm", "medias.obs": True}),
+    ],
+    "grupos": [
+        ("Pontos", {"medias.tipo": "pontos", "medias.obs": False}),
+        ("Barras agrupadas", {"medias.tipo": "barras", "medias.obs": False}),
+        ("Barras e dados", {"medias.tipo": "barras", "medias.obs": True, "medias.barra_alfa": 0.55}),
+        ("Box", {"medias.tipo": "box", "medias.obs": True}),
+        ("Interação (linhas)", {"medias.tipo": "linhas", "medias.obs": False}),
+        ("Linhas com rótulo direto", {"medias.tipo": "linhas", "medias.obs": False, "legenda.direta": True,
+                                      "letras.mostrar": False}),
+    ],
+    "regressao": [
+        ("Curva e médias", {"medias.obs": False, "reg.banda": False}),
+        ("Faixa de confiança", {"medias.obs": False, "reg.banda": True, "reg.banda_tipo": "confiança"}),
+        ("Com todas as parcelas", {"medias.obs": True, "reg.banda": True, "reg.banda_tipo": "confiança"}),
+        ("Faixa de predição", {"medias.obs": True, "reg.banda": True, "reg.banda_tipo": "predição"}),
+        ("Sem equação, rótulo direto", {"reg.equacao": False, "reg.r2": False, "legenda.direta": True}),
+    ],
+    "perfil": [
+        ("Com legenda", {"legenda.direta": False}),
+        ("Rótulos diretos", {"legenda.direta": True}),
+        ("Marcadores vazados", {"series.vazados": True}),
+    ],
+    "empilhado": [
+        ("Valores", {"emp.modo": "valores", "medias.horizontal": False}),
+        ("Percentual (100%)", {"emp.modo": "percentual (100%)", "medias.horizontal": False}),
+        ("Horizontal", {"emp.modo": "valores", "medias.horizontal": True}),
+        ("Horizontal 100%", {"emp.modo": "percentual (100%)", "medias.horizontal": True}),
+    ],
+}
+
+
+def _rerun():
+    try:
+        st.rerun(scope="fragment")
+    except Exception as e:
+        if type(e).__name__ in ("RerunException", "StopException"):
+            raise
+        st.rerun()
+
+
+def _definir(escopo, valores: dict):
+    """Aplica vários parâmetros de uma vez (com Desfazer) e ressincroniza os controles."""
+    _snapshot(escopo)
+    alvo, base = _alvo(escopo), _base(escopo)
+    for k, v in valores.items():
+        if v == base.get(k):
+            alvo.pop(k, None)
+        else:
+            alvo[k] = v
+    _limpar_widgets(escopo)
+
+
+def _validos(valores, tipo):
+    out = {}
+    for k, v in valores.items():
+        p = tm.POR_CHAVE.get(k)
+        if p is None:
+            continue
+        if p.tipo == "escolha" and p.opcoes and v not in p.opcoes:
+            continue
+        out[k] = v
+    return out
+
+
+def _grupos_paletas():
+    return [dict(nome=g, paletas=[dict(nome=n, cores=list(tm.PALETAS[n])[:8],
+                                       selo="")
+                                  for n in nomes if n in tm.PALETAS])
+            for g, nomes in tm.GRUPOS_PALETAS.items()]
+
+
+def faixa_paleta(nome, altura=14):
+    cores = list(tm.PALETAS.get(nome, []))[:8]
+    return ("<div style='display:flex;height:%dpx;border-radius:2px;overflow:hidden;min-width:120px'>" % altura
+            + "".join(f"<i style='flex:1;background:{c}'></i>" for c in cores) + "</div>")
+
+
+def seletor_paletas(escopo, t, chave="ctx"):
+    """Paleta atual à mostra e todas as demais em um clique, com as cores visíveis antes de escolher."""
+    atual = t["series.paleta"]
+    seguro = " · segura para daltônicos" if atual in tm.DALTONICOS else ""
+    st.html(f"<div class='ss-paleta'><span><b>Paleta</b> {atual}{seguro}</span>{faixa_paleta(atual)}</div>")
+    if not ui_comp.DISPONIVEL:
+        _widget(tm.POR_CHAVE["series.paleta"], escopo, atual, st.container(), f"{chave}p")
+        return
+    with st.popover("Trocar paleta — ver todas as cores", width="stretch"):
+        st.caption("O primeiro grupo é seguro para daltonismo. As sequenciais servem a doses, camadas e épocas.")
+        esc = ui_comp.seletor_paleta(_grupos_paletas(), atual, key=f"pal|{chave}|{escopo}")
+    if esc and esc != atual and esc in tm.PALETAS:
+        _definir(escopo, {"series.paleta": esc})
+        _rerun()
+
+
+def _controles(chaves, escopo, t, tipo, prefixo="ctx"):
+    oc = OCULTAR.get(tipo, set())
+    ps = [tm.POR_CHAVE[k] for k in chaves if k in tm.POR_CHAVE and k not in oc]
+    ps = [p for p in ps if p.tipo != "bool"] + [p for p in ps if p.tipo == "bool"]   # chaves liga/desliga por último
+    if not ps:
+        return 0
+    for bloco in ([p for p in ps if p.tipo != "bool"], [p for p in ps if p.tipo == "bool"]):
+        if not bloco:
+            continue
+        c1, c2 = st.columns(2)
+        for i, p in enumerate(bloco):
+            _widget(p, escopo, t[p.chave], c1 if i % 2 == 0 else c2, prefixo,
+                    opcoes=TIPOS_VALIDOS.get(tipo) if p.chave == "medias.tipo" else None)
+    return len(ps)
+
+
+def painel_contexto(it, sp, t, elem):
+    """Somente os controles do elemento clicado."""
+    tipo = sp.tipo
+    st.html(f"<div class='ss-ctx'><b>{ELEMENTOS[elem]}</b><span>{DICAS_ELEM[elem]}</span></div>")
+    principais, demais = _DADOS.get(tipo, ([], [])) if elem == "dados" else _CTX[elem]
+    if elem == "equacao":
+        secao_modelos(it, sp, "mdl_ctx")
+    if elem == "dados" and tipo in _COM_PALETA:
+        seletor_paletas(it.id, t)
+    _controles(principais, it.id, t, tipo)
+    oc = OCULTAR.get(tipo, set())
+    if [k for k in demais if k not in oc]:
+        with st.expander("Mais opções deste elemento"):
+            _controles(demais, it.id, t, tipo)
+    if elem in ("dados", "legenda") and sp.tipo not in ("correlacao", "diagnostico", "dendrograma") and sp.grupos():
+        with st.expander("Cor, marcador e linha de cada grupo"):
+            secao_grupos(sp, it.id, t)
+    if elem == "eixo_x" or (elem == "dados" and tipo in ("correlacao", "pca")):
+        if _niveis_da_spec(sp):
+            with st.expander("Renomear, reordenar e ocultar níveis", expanded=tipo in ("medias", "grupos")):
+                secao_niveis(sp, it.id, t)
+    if elem == "titulos":
+        st.caption("Códigos de texto: kg ha^-1 → kg ha⁻¹ · P_{2}O_{5} → P₂O₅ · *Crotalaria* → itálico · \\alpha → α · "
+                   "\\deg → °")
+    if elem in ("letras", "estat") or (elem == "dados" and tipo in ("regressao", "perfil")):
+        if tipo in ("medias", "grupos", "regressao", "perfil"):
+            with st.expander("Anotações: colchetes, linhas, faixas, textos e formas"):
+                secao_anotacoes(sp, it.id, t)
+
+
+def _aplicar_receita(escopo, valores):
+    _definir(escopo, valores)
+
+
+def galeria_estilos(it, sp, t, idioma):
+    receitas = RECEITAS.get(sp.tipo)
+    if not receitas:
+        return
+    if not st.toggle("Galeria de estilos: ver esta figura em outros formatos", key="est_galeria",
+                     help="Miniaturas feitas com os seus dados. Um clique aplica o estilo; Desfazer volta atrás."):
+        return
+    base_h = hash_tema(t)
+    por_linha = 4
+    for i in range(0, len(receitas), por_linha):
+        cols = st.columns(por_linha)
+        for c, (nome, val) in zip(cols, receitas[i:i + por_linha]):
+            val = _validos(val, sp.tipo)
+            tt = {**t, **val, "tela.largura_mm": 62.0, "tela.altura_mm": 46.0, "tela.titulo": "",
+                  "eixos.rotulo_x": " ", "legenda.mostrar": bool(val.get("legenda.direta")) and False}
+            k = ("mini", it.id, ss.versao, base_h, nome, idioma)
+            if k not in ss.cache_figs:
+                try:
+                    ss.cache_figs[k] = fg.gerar_previa(sp, tt, idioma, 80)
+                except Exception:
+                    ss.cache_figs[k] = None
+            with c:
+                if ss.cache_figs[k]:
+                    st.image(ss.cache_figs[k], width="stretch")
+                ativo = all(t.get(a) == b for a, b in val.items())
+                st.button(("● " if ativo else "") + nome, key=f"rec|{it.id}|{nome}", width="stretch",
+                          on_click=_aplicar_receita, args=(it.id, val), type="primary" if ativo else "secondary")
+
+
+def _cb_clique(chave, validos):
+    v = getattr(ss.get(chave), "clique", None)
+    if not v:
+        return
+    reg = str(v).rsplit("|", 1)[0]
+    elem = REG_ELEM.get(reg, reg)
+    ss.est_reg = reg
+    ss.est_elem = elem if elem in validos else "tela"
+
+
+def _cb_elem():
+    ss.est_reg = ss.get("est_elem")
+
+
+def previa_mapa(it, t, idioma, dpi):
+    k = ("mapa", it.id, ss.versao, hash_tema(t), idioma, dpi)
+    if len(ss.cache_figs) > 160:
+        ss.cache_figs = {}
+    if k not in ss.cache_figs:
+        ss.cache_figs[k] = fg.gerar_previa_mapa(it.spec, t, idioma, dpi)
+    return ss.cache_figs[k]
+
+
+ZOOMS = {"100%": 1.0, "125%": 1.25, "150%": 1.5, "200%": 2.0}
+
+
 @st.fragment
 def modo_figura(idioma):
     cat = catalogo(idioma)
     if not cat:
-        st.info("Execute uma análise (ou calcule correlações/PCA) para editar figuras.")
+        import estilo
+        estilo.vazio("Nenhuma figura ainda", "Execute uma análise (ou calcule correlações, PCA ou uma composição) para "
+                     "abrir as figuras aqui.")
         return
     ids = list(cat)
     if ss.get("est_sel_fig") not in ids:
         ss.est_sel_fig = ss.estudio_fig if ss.get("estudio_fig") in ids else ids[0]
-    c_sel, c_desf, c_rest = st.columns([6, 1.2, 1.2], vertical_alignment="bottom")
+    c_sel, c_desf, c_rest, c_pasta = st.columns([6, 1.2, 1.2, 1.2], vertical_alignment="bottom")
     sel = c_sel.selectbox("Figura", ids, format_func=lambda i: rotulo_item(cat[i]), key="est_sel_fig")
     ss.estudio_fig = sel
     it = cat[sel]
@@ -514,62 +815,89 @@ def modo_figura(idioma):
                   help=f"{n_hist} alteração(ões) para desfazer", on_click=_desfazer, args=(it.id,))
     c_rest.button("Restaurar", width="stretch", disabled=n_aj == 0, key="est_restaurar",
                   help="Volta esta figura ao tema global", on_click=_restaurar, args=(it.id,))
-    with st.container(key="barra_rapida"):
-        barra_rapida(it, t)
-        if sp.tipo == "regressao":
-            secao_modelos(it, sp, "mdl_rap")
-    col_ctrl, col_prev = st.columns([5, 6], gap="large")
+    with c_pasta:
+        botao_pasta(it, idioma, "est", t)
+    elems = ELEM_POR_TIPO.get(sp.tipo, ["dados", "tela"])
+    if ss.get("est_elem") not in elems:
+        ss.est_elem = "dados"
+        ss.est_reg = "dados"
+    col_prev, col_ctx = st.columns([6, 5], gap="large")
     with col_prev:
         with st.container(key="previa_fixa"):
             alt = t["tela.altura_mm"] or (fg._altura_padrao(sp, t) if sp.tipo != "diagnostico" else 0)
-            st.html(f"<div class='ss-legenda'><b>Prévia</b> em {t['tela.largura_mm']:g} × {alt:.0f} mm, "
-                    f"{n_aj} ajuste(s) próprio(s) nesta figura</div>")
+            dim = f"{t['tela.largura_mm']:g} × {alt:.0f} mm" if alt else f"{t['tela.largura_mm']:g} mm de largura"
+            st.html("<div class='ss-legenda'><b>Passe o mouse e clique</b> na parte da figura que quer ajustar. "
+                    f"Tamanho final: {dim} · {n_aj} ajuste(s) nesta figura</div>")
+            zoom = ZOOMS.get(ss.get("est_zoom") or "150%", 1.5)
             try:
-                png = previa(it, t, idioma, dpi=150)
-                st.image(png, width="content")
+                png, regs, tam = previa_mapa(it, t, idioma, int(min(max(110 * zoom * 1.5, 130), 240)))
+                ui_comp.figura_clicavel(png, regs, ss.get("est_reg"), largura_px=int(tam[0] / 25.4 * 110 * zoom),
+                                        key="est_clique", ao_clicar=lambda: _cb_clique("est_clique", elems))
+                if not ui_comp.DISPONIVEL:
+                    st.caption("Clique na figura indisponível nesta versão do Streamlit: use os botões ao lado.")
             except Exception as e:  # mostra o erro sem derrubar o editor
                 st.error(f"Não foi possível desenhar com estes ajustes: {e}")
-            st.html("<div class='ss-legenda'><b>Exportar</b> no tamanho exato acima</div>")
-            botoes_figura(it, idioma, "est", formatos=("png", "tiff", "svg", "pdf", "eps"), t=t)
+            with st.container(horizontal=True, gap="small", vertical_alignment="center"):
+                with st.popover("Baixar esta figura", type="primary"):
+                    baixar_figura(it, idioma, "est", t)
+                st.segmented_control("Zoom da prévia", list(ZOOMS), key="est_zoom", default="150%",
+                                     label_visibility="collapsed", help="Só muda a visualização; o arquivo sai no "
+                                     "tamanho em mm definido em Tamanho e fontes.")
+            galeria_estilos(it, sp, t, idioma)
+    with col_ctx:
+        avancado = st.toggle("Todas as opções em abas (modo avançado)", key="est_avancado",
+                             help="Mostra os cerca de 160 parâmetros organizados em abas, com busca pelo nome.")
+        if not avancado:
+            st.pills("Elemento", elems, format_func=lambda e: ELEMENTOS[e], key="est_elem", on_change=_cb_elem,
+                     label_visibility="collapsed")
+            elem = ss.get("est_elem") or "dados"
+            with st.container(key="painel_ctx"):
+                painel_contexto(it, sp, t, elem)
+        else:
+            termo = st.text_input("Buscar opção", key="est_busca", placeholder="ex.: hachura, log, legenda, decimais…",
+                                  label_visibility="collapsed")
+            if termo.strip():
+                busca_parametros(it.id, t, sp.tipo, termo)
+            else:
+                abas = ABAS_POR_TIPO.get(sp.tipo, tm.ABAS)
+                extras = ["Grupos e níveis"] + (["Anotações"] if sp.tipo in ("medias", "grupos", "regressao", "perfil")
+                                                else [])
+                tabs = st.tabs(abas + extras)
+                for tab, aba in zip(tabs, abas + extras):
+                    with tab:
+                        if aba == "Grupos e níveis":
+                            secao_grupos(sp, it.id, t)
+                            secao_niveis(sp, it.id, t)
+                        elif aba == "Anotações":
+                            secao_anotacoes(sp, it.id, t)
+                        else:
+                            if aba == "Regressão":
+                                secao_modelos(it, sp)
+                            if aba == "Séries" and sp.tipo in _COM_PALETA:
+                                seletor_paletas(it.id, t, "ed")
+                            controles_aba(aba, it.id, t, sp.tipo)
+        st.caption("● parâmetro alterado nesta figura; os demais vêm do tema global. Cada alteração pode ser desfeita.")
+        with st.expander("Reaproveitar o estilo desta figura"):
             b1, b2 = st.columns(2)
             if b1.button("Tornar tema global", width="stretch", disabled=n_aj == 0, key="est_global",
                          help="Leva os ajustes de estilo desta figura para o tema de todas as figuras"):
-                estilo = {k: v for k, v in ss.ajustes.get(it.id, {}).items()
-                          if not k.startswith(("niveis.", "anot.", "grupos.")) and k not in NAO_COPIAR}
-                ss.tema_global.update(estilo)
-                for k in estilo:
+                estilo_fig = {k: v for k, v in ss.ajustes.get(it.id, {}).items()
+                              if not k.startswith(("niveis.", "anot.", "grupos.")) and k not in NAO_COPIAR}
+                ss.tema_global.update(estilo_fig)
+                for k in estilo_fig:
                     ss.ajustes[it.id].pop(k, None)
                 st.rerun()
             b2.download_button("Salvar ajustes (.json)",
                                tm.para_json(ss.ajustes.get(it.id, {}), f"Ajustes — {it.titulo}"),
-                               file_name=f"ajustes_{it.nome}.json", mime="application/json", width="stretch")
+                               file_name=f"ajustes_{it.nome}.json", mime="application/json", width="stretch",
+                               on_click="ignore")
             secao_formato(it, cat, t)
-    with col_ctrl:
-        termo = st.text_input("Buscar opção", key=f"est_busca", placeholder="ex.: hachura, log, legenda, decimais…",
-                              label_visibility="collapsed")
-        if termo.strip():
-            busca_parametros(it.id, t, sp.tipo, termo)
-        else:
-            abas = ABAS_POR_TIPO.get(sp.tipo, tm.ABAS)
-            extras = ["Grupos e níveis"] + (["Anotações"] if sp.tipo in ("medias", "grupos", "regressao", "perfil") else [])
-            tabs = st.tabs(abas + extras)
-            for tab, aba in zip(tabs, abas + extras):
-                with tab:
-                    if aba == "Grupos e níveis":
-                        secao_grupos(sp, it.id, t)
-                        secao_niveis(sp, it.id, t)
-                    elif aba == "Anotações":
-                        secao_anotacoes(sp, it.id, t)
-                    else:
-                        if aba == "Regressão":
-                            secao_modelos(it, sp)
-                        controles_aba(aba, it.id, t, sp.tipo)
-        st.caption("● parâmetro alterado nesta figura; os demais vêm do tema global. Cada alteração pode ser desfeita.")
 
 
 def _limpar_widgets(escopo):
     for k in list(ss.keys()):
-        if isinstance(k, str) and k.startswith(("ed|", "edg|", "edn|", "edl|", "rap|", "busca|", "mdl|", "mdl_rap|", "rres|", "mres|")) and f"|{escopo}" in k:
+        if isinstance(k, str) and k.startswith(("ed|", "edg|", "edn|", "edl|", "rap|", "busca|", "mdl|", "mdl_rap|", "rres", "mres", "ctx|",
+                                                  "mdl_ctx|", "edp|", "ctxp|")) and f"|{escopo}" in k:
             del ss[k]
 
 
@@ -641,11 +969,17 @@ def modo_painel(idioma):
                                                dpi=130)
         st.html(f"<div class='ss-legenda'><b>Prévia</b> do painel em {cfg['largura']:g} mm de largura</div>")
         st.image(ss.cache_figs[k], width="stretch")
-        cols = st.columns(5)
-        for col, fmt in zip(cols, ("png", "tiff", "svg", "pdf", "eps")):
-            col.download_button(ROT_FMT[fmt], data=(lambda f=fmt: fg.gerar_painel(itens, cfg["linhas"], cfg["colunas"], tp,
-                                                                                  idioma, cfg["largura"], alt, fmt=f)),
-                                file_name=f"painel.{fmt}", mime=MIMES[fmt], key=f"pn_dl_{fmt}", width="stretch")
+        fmt = st.segmented_control("Formato", ["png", "tiff", "svg", "pdf", "eps"], format_func=lambda f: ROT_FMT[f],
+                                   key="pn_fmt", label_visibility="collapsed")
+        if fmt:
+            ka = k + (fmt,)
+            if ka not in ss.cache_figs:
+                ss.cache_figs[ka] = fg.gerar_painel(itens, cfg["linhas"], cfg["colunas"], tp, idioma, cfg["largura"], alt,
+                                                    fmt=fmt)
+            st.download_button(f"Baixar painel.{fmt}", ss.cache_figs[ka], file_name=f"painel.{fmt}", mime=MIMES[fmt],
+                               key=f"pn_dl_{fmt}", type="primary", width="stretch", on_click="ignore")
+        else:
+            st.caption("Escolha o formato para preparar o arquivo do painel.")
 
 
 def tema_painel():
@@ -684,13 +1018,15 @@ def modo_global(idioma):
         tabs = st.tabs(tm.ABAS)
         for tab, aba in zip(tabs, tm.ABAS):
             with tab:
+                if aba == "Séries":
+                    seletor_paletas("GLOBAL", t, "ed")
                 controles_aba(aba, "GLOBAL", t)
         st.caption("● indica parâmetro alterado em relação ao preset. Ajustes feitos em figuras específicas "
                    "continuam valendo por cima do tema global.")
     with col_prev:
         st.download_button("Salvar tema global (.json)", tm.para_json({**tm.PRESETS.get(ss.tema_preset, {}),
                                                                        **ss.tema_global}, "Meu tema"),
-                           file_name="tema_stat_soil.json", mime="application/json", width="stretch")
+                           file_name="tema_stat_soil.json", mime="application/json", width="stretch", on_click="ignore")
         if cat:
             ids = [i for i in cat if cat[i].spec.tipo != "diagnostico"]
             if ids:
@@ -723,7 +1059,7 @@ def ajuste_rapido(it, idioma="pt", chave=""):
     """Popover ao lado de cada figura na aba Resultados: tipo, valores individuais, erro, modelo…"""
     t = tema_figura(it.id, it.spec.tipo)
     with st.popover("Ajuste rápido", width="stretch"):
-        barra_rapida(it, t, "rres", vertical=True)
+        barra_rapida(it, t, f"rres:{chave}", vertical=True)
         if it.spec.tipo == "regressao":
-            secao_modelos(it, it.spec, "mres")
+            secao_modelos(it, it.spec, f"mres:{chave}")
         st.caption("Para tudo o mais (fontes, eixos, cores, anotações), use o Estúdio.")

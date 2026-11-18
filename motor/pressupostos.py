@@ -65,6 +65,18 @@ def avaliar(res, ajust, rstd, grupos, d, spec, qm_res, gl_res, y_orig=None, X_mo
                                 "Normal" if pa >= alfa else "Não normal", pa >= alfa, "complementar"))
         except Exception:
             pass
+        try:
+            from statsmodels.stats.diagnostic import lilliefors
+            D, pk = lilliefors(r, dist="norm")
+            testes.append(Teste("Normalidade dos resíduos (Lilliefors/Kolmogorov-Smirnov)", float(D), float(pk),
+                                "Normal" if pk >= alfa else "Não normal", pk >= alfa, "complementar"))
+        except Exception:
+            pass
+        if n >= 20:
+            K2, pk2 = stats.normaltest(r)
+            testes.append(Teste("Normalidade dos resíduos (D'Agostino-Pearson K²)", float(K2), float(pk2),
+                                "Normal" if pk2 >= alfa else "Não normal", pk2 >= alfa,
+                                "complementar; combina assimetria e curtose"))
     # assimetria e curtose (informativo)
     if n > 7:
         testes.append(Teste("Assimetria dos resíduos", float(stats.skew(r)), None,
@@ -86,6 +98,24 @@ def avaliar(res, ajust, rstd, grupos, d, spec, qm_res, gl_res, y_orig=None, X_mo
         testes.append(Teste("Homogeneidade de variâncias (Levene/Brown-Forsythe)", float(L), float(pl),
                             "Homogêneas" if pl >= alfa else "Heterogêneas", pl >= alfa,
                             "robusto a não normalidade"))
+        try:
+            Fk, pf = stats.fligner(*amostras)
+            testes.append(Teste("Homogeneidade de variâncias (Fligner-Killeen)", float(Fk), float(pf),
+                                "Homogêneas" if pf >= alfa else "Heterogêneas", pf >= alfa,
+                                "não paramétrico; o mais robusto a não normalidade"))
+        except Exception:
+            pass
+        tam = {len(a) for a in amostras}
+        if len(tam) == 1 and len(amostras) >= 2:
+            k_, n_ = len(amostras), tam.pop()
+            vs = np.array([np.var(a, ddof=1) for a in amostras])
+            C = float(vs.max() / vs.sum())
+            # p-valor de Cochran pela aproximação F (limite superior de Bonferroni)
+            Fc = (k_ - 1) * C / (1 - C) if C < 1 else np.inf
+            pc = float(min(1.0, k_ * stats.f.sf(Fc, n_ - 1, (n_ - 1) * (k_ - 1))))
+            testes.append(Teste("Homogeneidade de variâncias (Cochran C)", C, pc,
+                                "Homogêneas" if pc >= alfa else "Uma variância destoa", pc >= alfa,
+                                "sensível a um único tratamento com variância muito maior"))
         vmax, vmin = max(np.var(a, ddof=1) for a in amostras), min(np.var(a, ddof=1) for a in amostras)
         testes.append(Teste("Razão entre maior e menor variância", float(vmax / vmin) if vmin > 0 else None, None,
                             "Aceitável" if vmin > 0 and vmax / vmin < 4 else "Elevada", None, "regra prática < 4"))

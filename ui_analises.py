@@ -6,7 +6,7 @@ análise de trilha e planejamento de experimentos.
 
 from __future__ import annotations
 
-REVISAO = "2.2.1"   # conferida pelo app.py para descartar módulos antigos em memória
+REVISAO = "3.0.0"   # conferida pelo app.py para descartar módulos antigos em memória
 
 import numpy as np
 import pandas as pd
@@ -423,3 +423,219 @@ def aba_planejamento():
                   f"t = {int(t)}; CV = {br(cv, 1)}%; diferença = {br(dif, 0)}% da média; α = {br(alfa, 2)}.", "pl")
     st.caption("Poder calculado pela F não central na configuração menos favorável (duas médias diferindo pela "
                "diferença informada e as demais no centro). Valores orientativos para o planejamento.")
+
+
+# ============================================================================
+# Quadro de resultados (visão rápida de uma variável e de todas)
+# ============================================================================
+def visao_geral(resultados: dict, idioma="pt"):
+    """Matriz variáveis × efeitos: onde houve efeito significativo, CV e situação dos pressupostos."""
+    import estilo
+    from motor import relatorio_blocos as rb
+    ok = [(k, r) for k, r in resultados.items() if not isinstance(r, Exception)]
+    if len(ok) < 2:
+        return
+    with st.expander(f"Visão geral das {len(ok)} análises: onde houve efeito significativo", expanded=False):
+        colunas, linhas = [], []
+        for (g, v), r in ok:
+            efs = [e for e in rb.efeitos_testados(r, "pt") if not e["local"]]
+            for e in efs:
+                if e["nome"] not in colunas:
+                    colunas.append(e["nome"])
+            cv = " / ".join(br(x, 1) for x in r.cv.values())
+            linhas.append((v + (f" · {g}" if g else ""), {e["nome"]: e["p"] for e in efs}, cv, rb.estado_pressupostos(r)))
+        estilo.matriz_geral(colunas, linhas)
+        st.caption("*** p < 0,001 · ** p < 0,01 · * p < 0,05 · ns não significativo. Luz verde: normalidade e "
+                   "homogeneidade atendidas; laranja: confira a sub-aba Pressupostos da variável.")
+
+
+_GRUPOS_TESTE = (("Normalidade dos resíduos", ("Normalidade", "Assimetria", "Curtose")),
+                 ("Homogeneidade de variâncias", ("Homogeneidade", "Razão entre")),
+                 ("Modelo e observações", ("Aditividade", "Independência", "Valores discrepantes")))
+
+
+def quadro_resultados(res, idioma="pt"):
+    """Efeitos com barra de tamanho de efeito, lista de pressupostos com luzes e leitura rápida das médias."""
+    import estilo
+    from motor import relatorio_blocos as rb
+    efs = rb.efeitos_testados(res, "pt")
+    c1, c2 = st.columns([6, 5], gap="medium")
+    with c1:
+        estilo.quadro_efeitos(efs, res.alfa)
+        itens = []
+        spec = res.spec
+        for fa in res.fatias:
+            if fa.condicao:
+                continue
+            sig = fa.p is not None and fa.p < res.alfa
+            nome = spec.fatores[fa.fator].rotulo
+            m = np.asarray(fa.medias_orig, float)
+            if not len(m) or not np.isfinite(m).any():
+                continue
+            i_max, i_min = int(np.nanargmax(m)), int(np.nanargmin(m))
+            dec = exportar._decimais(float(np.nanmean(np.abs(m))))
+            if not sig:
+                itens.append((f"<b>{nome}</b>: sem diferença significativa entre os níveis (p = {estilo.p_txt(fa.p)}).", False))
+                continue
+            txt = (f"<b>{nome}</b>: maior média em <b>{fa.niveis[i_max]}</b> ({br(m[i_max], dec)}) e menor em "
+                   f"<b>{fa.niveis[i_min]}</b> ({br(m[i_min], dec)})")
+            if m[i_min] > 0:
+                txt += f", diferença de {br((m[i_max] / m[i_min] - 1) * 100, 1)}%"
+            if fa.regressao and fa.regressao.melhor is not None:
+                a = fa.regressao.melhor
+                txt += f". Modelo: {a.nome}, R² = {br(a.r2, 3)}"
+            itens.append((txt + ".", True))
+        inter = [e for e in efs if "×" in e["nome"] and not e["local"]]
+        for e in inter:
+            if e["p"] < res.alfa:
+                itens.append((f"<b>Interação {e['nome']}</b> significativa (p = {estilo.p_txt(e['p'])}): interprete as "
+                              "médias de um fator dentro de cada nível do outro (sub-aba Médias e gráficos).", True))
+        if itens:
+            estilo.destaques(itens)
+    with c2:
+        pr = res.pressupostos
+        grupos = []
+        usados = set()
+        for titulo, prefixos in _GRUPOS_TESTE:
+            ts = [t for t in pr.testes if t.nome.startswith(prefixos)]
+            usados.update(id(t) for t in ts)
+            if not ts:
+                continue
+            if titulo.startswith("Normalidade") and pr.ok_normalidade is not None:
+                est = "ok" if pr.ok_normalidade else "alerta"
+            elif titulo.startswith("Homogeneidade") and pr.ok_homogeneidade is not None:
+                est = "ok" if pr.ok_homogeneidade else "alerta"
+            else:
+                est = "alerta" if any(t.ok is False for t in ts) else "ok"
+            linhas = []
+            for t in ts:
+                nome = t.nome
+                if "(" in nome and nome.startswith(("Normalidade", "Homogeneidade", "Aditividade", "Independência")):
+                    nome = nome[nome.index("(") + 1:].rstrip(")")
+                    nome = nome[0].upper() + nome[1:]
+                linhas.append((nome, t.conclusao if t.conclusao not in ("—", None) else (t.nota or ""),
+                               br(t.estatistica, 3) if t.estatistica is not None and np.isfinite(t.estatistica) else "",
+                               ("p " + estilo.p_txt(t.p)) if t.p is not None else "",
+                               "ok" if t.ok else ("alerta" if t.ok is False else "")))
+            grupos.append((titulo, est, linhas))
+        estilo.checklist(grupos)
+        if pr.recomendacao:
+            st.caption(pr.recomendacao)
+
+
+# ============================================================================
+# Exploração interativa dos dados (Plotly)
+# ============================================================================
+def explorar_dados(df: pd.DataFrame):
+    with st.expander("Explorar os dados com o mouse (gráfico interativo)"):
+        try:
+            import plotly.graph_objects as go
+        except Exception:
+            st.caption("Instale o pacote plotly (pip install plotly) para habilitar o gráfico interativo.")
+            return
+        from motor import tema as tm
+        from ui_comum import tema_base
+        nums = [c for c in df.columns if pd.to_numeric(df[c], errors="coerce").notna().mean() > 0.8]
+        cats = [c for c in df.columns if df[c].nunique() <= 40]
+        if not nums:
+            st.caption("Não há colunas numéricas para explorar.")
+            return
+        v = ss.get("dados_v", 0)
+        c1, c2, c3, c4 = st.columns([2, 2, 2, 1.6])
+        y = c1.selectbox("Eixo Y", nums, index=len(nums) - 1, key=f"ex_y_{v}")
+        xs = [c for c in df.columns if c != y]
+        x = c2.selectbox("Eixo X", xs, index=xs.index(cats[1]) if len(cats) > 1 and cats[1] in xs else 0, key=f"ex_x_{v}")
+        cor = c3.selectbox("Cor", ["(nenhuma)"] + [c for c in cats if c != y], key=f"ex_c_{v}")
+        tipo = c4.segmented_control("Tipo", ["Pontos", "Caixas"], default="Pontos", key=f"ex_t_{v}") or "Pontos"
+        d = df.copy()
+        d["_linha"] = d.index + 2
+        d["_y"] = pd.to_numeric(d[y].astype(str).str.replace(",", "."), errors="coerce")
+        x_num = pd.to_numeric(d[x].astype(str).str.replace(",", "."), errors="coerce")
+        x_cat = not (x_num.notna().all() and d[x].nunique() > 8)
+        t = tema_base()
+        paleta = list(tm.PALETAS.get(t["series.paleta"], tm.PALETAS["Okabe-Ito"]))
+        fig = go.Figure()
+        grupos = [(None, d)] if cor == "(nenhuma)" else list(d.groupby(cor, sort=False))
+        outras = [c for c in df.columns if c not in (x, y)][:6]
+        rng = np.random.default_rng(1)
+        for i, (g, dg) in enumerate(grupos):
+            c_ = paleta[i % len(paleta)]
+            custom = np.column_stack([dg["_linha"]] + [dg[o].astype(str) for o in outras]) if len(dg) else None
+            dica = (f"<b>{y}: %{{y}}</b><br>{x}: %{{text}}<br>linha %{{customdata[0]}} da planilha"
+                    + "".join(f"<br>{o}: %{{customdata[{j + 1}]}}" for j, o in enumerate(outras)) + "<extra></extra>")
+            if tipo == "Caixas" and x_cat:
+                fig.add_trace(go.Box(x=dg[x].astype(str), y=dg["_y"], name=str(g) if g is not None else y,
+                                     marker_color=c_, boxpoints="all", jitter=0.35, pointpos=0, line_width=1.2,
+                                     customdata=custom, text=dg[x].astype(str), hovertemplate=dica,
+                                     marker=dict(size=6, opacity=0.6)))
+            else:
+                if x_cat:
+                    niveis = list(dict.fromkeys(d[x].astype(str)))
+                    base = dg[x].astype(str).map({n: k for k, n in enumerate(niveis)}).to_numpy(float)
+                    desloc = (i - (len(grupos) - 1) / 2) * (0.6 / max(len(grupos), 1))
+                    xv = base + desloc + rng.uniform(-0.06, 0.06, len(dg))
+                else:
+                    xv = x_num.loc[dg.index]
+                fig.add_trace(go.Scatter(x=xv, y=dg["_y"], mode="markers", name=str(g) if g is not None else y,
+                                         marker=dict(size=8, color=c_, opacity=0.7, line=dict(width=0.6, color="white")),
+                                         customdata=custom, text=dg[x].astype(str), hovertemplate=dica))
+        if x_cat and not (tipo == "Caixas"):
+            niveis = list(dict.fromkeys(d[x].astype(str)))
+            fig.update_xaxes(tickmode="array", tickvals=list(range(len(niveis))), ticktext=niveis)
+        fig.update_layout(height=390, margin=dict(l=10, r=10, t=10, b=10), font=dict(family="Roboto, Arial", size=13),
+                          boxmode="group", legend=dict(orientation="h", y=1.08, x=0, title_text=""),
+                          showlegend=cor != "(nenhuma)", dragmode="select", hoverlabel=dict(font_size=12.5))
+        fig.update_xaxes(showgrid=False, zeroline=False, showline=True, ticks="outside", title_text=x)
+        fig.update_yaxes(showgrid=False, zeroline=False, showline=True, ticks="outside", title_text=y)
+        ev = st.plotly_chart(fig, key=f"ex_fig_{v}", on_select="rerun", selection_mode=("box", "lasso", "points"),
+                             config=dict(displaylogo=False, modeBarButtonsToRemove=["autoScale2d"]))
+        linhas = sorted({int(p["customdata"][0]) for p in (ev.selection.points if ev and ev.selection else [])
+                         if p.get("customdata")})
+        if linhas:
+            st.caption(f"{len(linhas)} observação(ões) selecionada(s). O número da linha é o da planilha (com o cabeçalho "
+                       "na linha 1); para retirar uma observação da análise, use Resultados → Pressupostos.")
+            st.dataframe(df[(df.index + 2).isin(linhas)].assign(**{"Linha na planilha": lambda q: q.index + 2}),
+                         hide_index=True, height=min(38 + 35 * len(linhas), 220))
+        else:
+            st.caption("Passe o mouse para ver a linha da planilha e os fatores de cada ponto; arraste para selecionar "
+                       "observações suspeitas e ver os registros. Roda do mouse e duplo clique controlam o zoom.")
+
+
+# ============================================================================
+# Composição: barras empilhadas (ex.: frações de P, de C ou de N)
+# ============================================================================
+def secao_composicao(df, numericas, cat_cols, mostrar_figuras, idioma="pt"):
+    from motor import figuras as fg
+    st.caption("Barras empilhadas com as médias de várias variáveis que somam um total (frações de P, formas de N, "
+               "componentes da produtividade), em valores ou em percentual (100%). A haste mostra o erro-padrão do total.")
+    c1, c2 = st.columns([3, 2])
+    comps = c1.multiselect("Componentes (segmentos da barra, de baixo para cima)", numericas, key="emp_vars")
+    fatores = [f.coluna for f in ((ss.config_exec or {}).get("spec").fatores if ss.config_exec else [])]
+    opcoes = [c for c in dict.fromkeys(fatores + list(cat_cols)) if c in df.columns and c not in comps]
+    cat = c2.selectbox("Categorias (eixo)", opcoes, key="emp_cat") if opcoes else None
+    c3, c4 = st.columns([3, 2])
+    rot_y = c3.text_input("Título do eixo dos valores", key="emp_roty", placeholder="ex.: P (mg kg^-1)")
+    filtros = ["(nenhum)"] + [c for c in opcoes if c != cat]
+    fcol = c4.selectbox("Filtrar (opcional)", filtros, key="emp_fcol")
+    d = df
+    if fcol != "(nenhum)":
+        nv = st.selectbox("Nível", list(dict.fromkeys(df[fcol].astype(str))), key="emp_fnv")
+        d = df[df[fcol].astype(str) == nv]
+    if st.button("Montar gráfico de composição", type="primary", key="emp_go", disabled=not (cat and len(comps) >= 2)):
+        num = d[comps].apply(lambda s: pd.to_numeric(s.astype(str).str.replace(",", "."), errors="coerce"))
+        chave = d[cat].astype(str)
+        medias = num.groupby(chave, sort=False).mean()
+        tot = num.sum(axis=1, min_count=1).groupby(chave, sort=False)
+        ep = (tot.std(ddof=1) / np.sqrt(tot.count())).reindex(medias.index).to_numpy(float)
+        ss.extras["empilhado"] = fg.SpecEmpilhado(list(medias.index), list(comps), medias,
+                                                  ep if np.isfinite(ep).any() else None, rotulo_x=str(cat),
+                                                  rotulo_y=rot_y or "", titulo_legenda="")
+        nova_versao()
+    sp = ss.extras.get("empilhado")
+    if sp is None:
+        return
+    mostrar_figuras([catalogo(idioma)["multi::empilhado"]], "emp", 2)
+    tab = sp.valores.copy()
+    tab["Total"] = tab.sum(axis=1)
+    tab.index.name = sp.rotulo_x or "Categoria"
+    tabela_ui(tab.reset_index(), "composicao_medias", "Médias dos componentes e total", "", "emp_t")

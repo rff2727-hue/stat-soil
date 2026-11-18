@@ -49,9 +49,27 @@ class SpecMedias:
     rotulo_y: str = ""
     titulo: str = ""
     tipo: str = "medias"
+    estat: dict | None = None                # teste que sustenta a figura: F, gl1, gl2, p, eta2p, n, metodo
+    pares: list | None = None                # comparações par a par: g1, g2, p, sig
 
     def grupos(self):
         return [str(n) for n in self.niveis]
+
+
+@dataclass
+class SpecEmpilhado:
+    """Barras empilhadas: categorias no eixo e componentes (ex.: frações de P) como segmentos."""
+    categorias: list
+    componentes: list
+    valores: pd.DataFrame                    # índice = categorias, colunas = componentes (médias)
+    ep_total: np.ndarray | None = None       # erro-padrão do total por categoria
+    rotulo_x: str = ""
+    rotulo_y: str = ""
+    titulo_legenda: str = ""
+    tipo: str = "empilhado"
+
+    def grupos(self):
+        return [str(c) for c in self.componentes]
 
 
 @dataclass
@@ -176,7 +194,7 @@ class SpecDendrograma:
         return [f"Grupo {g}" for g in sorted({int(x) for x in self.clusters})]
 
 
-TIPOS_NOME = {"medias": "Médias", "grupos": "Interação", "regressao": "Regressão", "perfil": "Perfil",
+TIPOS_NOME = {"empilhado": "Barras empilhadas", "medias": "Médias", "grupos": "Interação", "regressao": "Regressão", "perfil": "Perfil",
               "correlacao": "Correlação", "pca": "PCA", "diagnostico": "Diagnóstico", "dendrograma": "Agrupamento"}
 
 
@@ -433,8 +451,43 @@ def _jitter(n, largura, semente=0):
     return base
 
 
-def _legenda(ax, t, handles, labels, titulo=None, padrao="automática", n_itens=None):
+def _rotulos_diretos(ax, t, pontas, labels, cores, abaixo=False):
+    """Nome de cada série ao lado do último ponto, na cor da série, afastando rótulos que se sobrepõem."""
+    fs = t["fonte.legenda"]
+    if abaixo:      # perfis: abaixo do último ponto de cada série
+        for (x, y), lb, cor in zip(pontas, labels, cores):
+            ax.annotate(lb, (x, y), xytext=(0, -fs * 0.9), textcoords="offset points", ha="center", va="top",
+                        fontsize=fs, color=cor, annotation_clip=False, gid="legenda")
+        return
+    fig = ax.figure
+    tr = ax.transData
+    ys = np.array([tr.transform((x, y))[1] for x, y in pontas], float)
+    passo = fs * 1.25 * fig.dpi / 72
+    ordem = np.argsort(ys)
+    alvo = ys.copy()
+    for _ in range(60):
+        mudou = False
+        for a, b in zip(ordem[:-1], ordem[1:]):
+            d = alvo[b] - alvo[a]
+            if d < passo:
+                alvo[a] -= (passo - d) / 2
+                alvo[b] += (passo - d) / 2
+                mudou = True
+        if not mudou:
+            break
+    for (x, y), ya, y0, lb, cor in zip(pontas, alvo, ys, labels, cores):
+        dy = (ya - y0) * 72 / fig.dpi
+        # na borda direita da área do gráfico, alinhado à altura do último ponto: fica livre de dados e letras
+        ax.annotate(lb, (1.0, y), xycoords=ax.get_yaxis_transform(), xytext=(fs * 0.55, dy), textcoords="offset points",
+                    ha="left", va="center", fontsize=fs, color=cor, annotation_clip=False, gid="legenda")
+
+
+def _legenda(ax, t, handles, labels, titulo=None, padrao="automática", n_itens=None, pontas=None, abaixo=False):
     if not t["legenda.mostrar"] or not handles:
+        return None
+    if t.get("legenda.direta") and pontas is not None and len(pontas) == len(handles):
+        _rotulos_diretos(ax, t, pontas, labels, [h.get_color() if hasattr(h, "get_color") else t["fonte.cor"]
+                                                 for h in handles], abaixo)
         return None
     pos = t["legenda.posicao"]
     if pos == "automática":
@@ -464,9 +517,9 @@ def _texto_letra(t, ax, x, y, s, horizontal=False, cor=None):
     kw = dict(fontsize=t["fonte.letras"], color=cor or t["fonte.cor"], clip_on=True,
               fontstyle="italic" if t["letras.italico"] else "normal")
     if horizontal:
-        ax.text(y, x, " " + s, ha="left", va="center", **kw)
+        ax.text(y, x, " " + s, ha="left", va="center", gid="letras", **kw)
     else:
-        ax.text(x, y, s, ha="center", va="bottom", **kw)
+        ax.text(x, y, s, ha="center", va="bottom", gid="letras", **kw)
 
 
 # ============================================================================
@@ -491,6 +544,9 @@ def _idx(niveis, escolhidos):
 def desenhar_medias(ax, sp: SpecMedias, t, idioma="pt", legenda=True):
     H = bool(t["medias.horizontal"])
     ordem = _ordem(sp.niveis, t)
+    if t["medias.ordenar"] != "original":
+        m_ = {str(n): float(v) for n, v in zip(sp.niveis, np.asarray(sp.medias, float))}
+        ordem = sorted(ordem, key=lambda o: m_.get(str(o), 0.0), reverse=t["medias.ordenar"] == "decrescente")
     ii = _idx(sp.niveis, ordem)
     k = len(ii)
     pos = np.arange(k, dtype=float)
@@ -544,6 +600,13 @@ def desenhar_medias(ax, sp: SpecMedias, t, idioma="pt", legenda=True):
                 ax.barh(pos[j], med[j], height=larg, **kw)
             else:
                 ax.bar(pos[j], med[j], width=larg, **kw)
+        elif tipo == "pirulito":
+            b0 = float(t["eixos.y_min"]) if t["eixos.y_min"] is not None else 0.0
+            lw_h = max(1.1, t["series.linha_esp"] * 1.4)
+            if H:
+                ax.hlines(pos[j], b0, med[j], color=to_rgba(cor, 0.55), lw=lw_h, zorder=1)
+            else:
+                ax.vlines(pos[j], b0, med[j], color=to_rgba(cor, 0.55), lw=lw_h, zorder=1)
         elif tipo in ("box", "raincloud", "meia-caixa") and len(vals[j]) >= 2:
             w = {"box": larg, "raincloud": larg * 0.22, "meia-caixa": larg * 0.34}[tipo]
             p = pos[j] + (dx_med if tipo == "meia-caixa" else 0.0)
@@ -581,14 +644,15 @@ def desenhar_medias(ax, sp: SpecMedias, t, idioma="pt", legenda=True):
     # médias e erros
     for j in range(k):
         cor = cores[j]
-        mostra_ponto = tipo in ("pontos", "violino", "beeswarm", "raincloud", "meio-violino")
+        mostra_ponto = tipo in ("pontos", "violino", "beeswarm", "raincloud", "meio-violino", "pirulito")
         if tipo == "raincloud":
             ax.plot(*((med[j], pos[j]) if H else (pos[j], med[j])), marker="o", ms=ms * 0.8, color=cor,
                     mec="white", mew=0.5, zorder=5)
             continue
         ye = _yerr(t, err[j:j + 1])
         kw = dict(fmt="o" if mostra_ponto else "none", color=_cor_erro(t, cor), ecolor=_cor_erro(t, cor),
-                  ms=ms, elinewidth=t["erro.esp"], capthick=t["erro.esp"], capsize=t["erro.chapeu"], zorder=4,
+                  ms=ms * (1.35 if tipo == "pirulito" else 1), elinewidth=t["erro.esp"], capthick=t["erro.esp"],
+                  capsize=t["erro.chapeu"], zorder=4,
                   mfc=("white" if t["series.vazados"] else cor), mec=(cor if t["series.vazados"] else t["series.marcador_borda_cor"]),
                   mew=(t["series.marcador_borda"] if not t["series.vazados"] else max(t["series.marcador_borda"], 0.8)))
         if tipo in ("box", "meia-caixa"):
@@ -612,7 +676,7 @@ def desenhar_medias(ax, sp: SpecMedias, t, idioma="pt", legenda=True):
         topo = np.maximum(topo, np.where(np.isfinite(topo_obs), topo_obs, topo))
         base = np.minimum(base, np.where(np.isfinite(base_obs), base_obs, base))
     lo, hi = float(np.nanmin(base)), float(np.nanmax(topo))
-    zero = tipo == "barras"
+    zero = tipo in ("barras", "pirulito") and t["eixos.y_min"] is None
     if zero:
         lo = min(lo, 0.0)
     faixa = (hi - lo) or abs(hi) or 1
@@ -625,7 +689,13 @@ def desenhar_medias(ax, sp: SpecMedias, t, idioma="pt", legenda=True):
         for j, i in enumerate(ii):
             xl = pos[j] + (dx_med if tipo in ("pontos", "meia-caixa", "meio-violino", "beeswarm") else 0)
             _texto_letra(t, ax, xl, alvo[j] + d, letras[i], H)
-    colchetes = _colchetes(ax, t, ordem, pos, hi + (0.10 * faixa if tem_letras else 0.02 * faixa), faixa, H)
+    colchetes = _colchetes(ax, t, ordem, pos, hi + (0.10 * faixa if tem_letras else 0.02 * faixa), faixa, H,
+                           extras=_colchetes_auto(sp, t, ordem, idioma))
+    if t["stats.subtitulo"] and sp.estat:
+        ax._estat = _texto_estat(sp.estat, t, idioma)
+        ax.annotate(ax._estat, (0, 1), xycoords="axes fraction", xytext=(0, 3), textcoords="offset points",
+                    ha="left", va="bottom", fontsize=t["fonte.legenda"], color=t["fonte.cor"], alpha=0.8,
+                    annotation_clip=False, gid="estat")
     if t["medias.rotulo_valor"]:
         _rotulos_valor(ax, t, pos + (dx_med if tipo in ("pontos", "meia-caixa", "meio-violino", "beeswarm") else 0),
                        med, err, tipo, H, idioma)
@@ -812,20 +882,75 @@ def _rotulos_valor(ax, t, pos, med, err, tipo, H, idioma):
             ax.text(p + 0.09, m, s, ha="left", va="center", **kw)
 
 
-def _colchetes(ax, t, ordem, pos, y0, faixa, H=False):
+def _texto_estat(e, t, idioma):
+    """Linha no estilo ggbetweenstats: F(gl1; gl2) = …; p = …; η²p = …; n = …"""
+    pt = idioma == "pt"
+    def n(v, d):
+        return f"{v:.{d}f}".replace(".", _sep(t, idioma))
+    partes = []
+    if e.get("f") is not None and np.isfinite(e["f"]):
+        gl2 = e.get("gl2")
+        gl2s = f"{gl2:.0f}" if gl2 is not None and abs(gl2 - round(gl2)) < 1e-6 else n(gl2 or 0, 1)
+        partes.append(f"F({e.get('gl1', 0):.0f}{';' if pt else ','} {gl2s}) = {n(e['f'], 2)}")
+    if e.get("p") is not None:
+        partes.append("p < 0,001".replace(",", _sep(t, idioma)) if e["p"] < 0.001 else f"p = {n(e['p'], 3)}")
+    if e.get("eta2p") is not None and np.isfinite(e["eta2p"]):
+        partes.append(f"η²p = {n(e['eta2p'], 2)}")
+    if e.get("n"):
+        partes.append(f"n = {int(e['n'])}")
+    if e.get("metodo"):
+        partes.append(str(e["metodo"]))
+    return ("; " if pt else ", ").join(partes)
+
+
+def _colchetes_auto(sp, t, ordem, idioma):
+    """Colchetes gerados do teste de médias (significativos ou todos), do par mais próximo ao mais distante."""
+    modo = t["stats.colchetes"]
+    if modo == "nenhum" or not sp.pares:
+        return []
+    out = []
+    for q in sp.pares:
+        a, b = str(q.get("g1")), str(q.get("g2"))
+        if a not in ordem or b not in ordem or (modo == "significativos" and not q.get("sig")):
+            continue
+        p = q.get("p")
+        if t["stats.colchete_texto"] == "valor de p" and p is not None and np.isfinite(p):
+            txt = ("p < 0,001" if p < 0.001 else f"p = {p:.3f}").replace(",", _sep(t, idioma)).replace(".", _sep(t, idioma))
+        elif p is not None and np.isfinite(p):
+            txt = "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else "ns"
+        else:
+            txt = "*" if q.get("sig") else "ns"
+        out.append({"de": a, "ate": b, "texto": txt, "_d": abs(ordem.index(a) - ordem.index(b))})
+    out.sort(key=lambda c: c["_d"])
+    return out[:10]
+
+
+def _colchetes(ax, t, ordem, pos, y0, faixa, H=False, extras=None):
     itens = [c for c in (t["anot.colchetes"] or []) if str(c.get("de")) in ordem and str(c.get("ate")) in ordem]
-    for n, c in enumerate(itens):
-        a, b = pos[ordem.index(str(c["de"]))], pos[ordem.index(str(c["ate"]))]
-        y = y0 + n * 0.09 * faixa
-        h = 0.025 * faixa
+    itens = itens + list(extras or [])
+    linhas_ocup = []          # intervalos já usados em cada linha (colchetes que não se cruzam dividem a linha)
+    for c in itens:
+        a, b = sorted((pos[ordem.index(str(c["de"]))], pos[ordem.index(str(c["ate"]))]))
+        n = 0
+        while n < len(linhas_ocup) and any(not (b < a2 - 0.01 or a > b2 + 0.01) for a2, b2 in linhas_ocup[n]):
+            n += 1
+        if n == len(linhas_ocup):
+            linhas_ocup.append([])
+        linhas_ocup[n].append((a, b))
+        a, b = a + 0.07, b - 0.07
+        y = y0 + n * 0.095 * faixa
+        h = 0.02 * faixa
         kw = dict(color=t["eixos.cor"], lw=t["eixos.espessura"], clip_on=False)
+        fs = t["fonte.letras"] * (0.9 if len(str(c.get("texto") or "")) > 3 else 1)
         if H:
             ax.plot([y, y + h, y + h, y], [a, a, b, b], **kw)
-            ax.text(y + h * 1.6, (a + b) / 2, tm.rico(c.get("texto") or "*"), va="center", ha="left", fontsize=t["fonte.letras"])
+            ax.text(y + h * 1.6, (a + b) / 2, tm.rico(c.get("texto") or "*"), va="center", ha="left", fontsize=fs)
         else:
             ax.plot([a, a, b, b], [y, y + h, y + h, y], **kw)
-            ax.text((a + b) / 2, y + h * 1.2, tm.rico(c.get("texto") or "*"), ha="center", va="bottom", fontsize=t["fonte.letras"])
-    return len(itens)
+            ax.text((a + b) / 2, y + h * 1.1, tm.rico(c.get("texto") or "*"), ha="center", va="bottom", fontsize=fs,
+                    linespacing=0.8)
+    return len(linhas_ocup)
+
 
 
 def _anotacoes(ax, t, media=None, eixo_media="y", idioma="pt"):
@@ -920,7 +1045,7 @@ def desenhar_grupos(ax, sp: SpecGrupos, t, idioma="pt", legenda=True):
     larg = min(t["medias.espaco_grupos"] / max(kb, 1), 0.32)
     ms = t["series.marcador_tam"]
     topo_g, base_g = -np.inf, np.inf
-    handles, labels = [], []
+    handles, labels, pontas = [], [], []
     letras_pos = []
     for j, b in enumerate(B):
         cor = tm.cor_grupo(t, b, j)
@@ -970,6 +1095,7 @@ def desenhar_grupos(ax, sp: SpecGrupos, t, idioma="pt", legenda=True):
                               mec=cor if t["series.vazados"] else t["series.marcador_borda_cor"]) if tipo != "barras"
                        else Patch(facecolor=to_rgba(cor, 0.35), edgecolor=cor, hatch=hach, lw=0.5))
         labels.append(tm.nome_rico(t, b))
+        pontas.append((x[-1], m[-1]))
         topo_g, base_g = max(topo_g, np.nanmax(topo)), min(base_g, np.nanmin(base))
         for i, a in enumerate(A):
             L = ""
@@ -984,7 +1110,7 @@ def desenhar_grupos(ax, sp: SpecGrupos, t, idioma="pt", legenda=True):
     if tem:
         for (xx, tp, te, L) in letras_pos:
             yy = {"acima dos dados": tp, "acima do erro": te, "topo alinhado": topo_g}[t["letras.posicao"]]
-            ax.text(xx, yy + t["letras.distancia"] * faixa, L, ha="center", va="bottom", fontsize=t["fonte.letras"],
+            ax.text(xx, yy + t["letras.distancia"] * faixa, L, ha="center", va="bottom", fontsize=t["fonte.letras"], gid="letras",
                     clip_on=True, fontstyle="italic" if t["letras.italico"] else "normal",
                     rotation=90 if (len(L) > 3 and kb * ka > 16) else 0)
     _limites_y(ax, t, lo, topo_g, 0.16 if tem else 0.06, zero=tipo == "barras")
@@ -995,7 +1121,8 @@ def desenhar_grupos(ax, sp: SpecGrupos, t, idioma="pt", legenda=True):
     estilizar_eixo(ax, t, idioma, x_categorico=True)
     _rotulos_eixos(ax, t, sp.nome_A, sp.rotulo_y)
     if legenda:
-        _legenda(ax, t, handles, labels, sp.nome_B, padrao="fora — acima")
+        _legenda(ax, t, handles, labels, sp.nome_B, padrao="fora — acima",
+                 pontas=pontas if (conectar and tipo == "pontos") else None)
     return ax
 
 
@@ -1043,7 +1170,7 @@ def desenhar_regressao(ax, sp: SpecRegressao, t, idioma="pt", legenda=True):
     xs = np.concatenate([c.x for c in curvas])
     xr = (xs.max() - xs.min()) or 1.0
     ms = t["series.marcador_tam"]
-    textos, handles = [], []
+    textos, handles, pontas_r = [], [], []
     ys_all = []
     for j, c in enumerate(curvas):
         g = str(c.rotulo) if multi else "série"
@@ -1095,6 +1222,10 @@ def desenhar_regressao(ax, sp: SpecRegressao, t, idioma="pt", legenda=True):
         handles.append(Line2D([], [], color=cor, marker=mk, ms=ms * 0.9, lw=t["reg.esp"], ls=ls,
                               mfc="white" if t["series.vazados"] else cor,
                               mec=cor if t["series.vazados"] else t["series.marcador_borda_cor"]))
+        if c.sig and mod is not None:
+            pontas_r.append((float(xx[-1]), float(mod.prever(xx[-1:])[0])))
+        else:
+            pontas_r.append((float(c.x.max()), float(np.sum(c.medias * c.n) / np.sum(c.n))))
     ys = np.concatenate([np.ravel(y) for y in ys_all]) if ys_all else np.array([0, 1])
     lo, hi = float(np.nanmin(ys)), float(np.nanmax(ys))
     faixa = (hi - lo) or 1
@@ -1129,12 +1260,12 @@ def desenhar_regressao(ax, sp: SpecRegressao, t, idioma="pt", legenda=True):
             linhas = _quebrar_eq(textos[0][1], t)
             if pos == "abaixo do gráfico":
                 ax.text(0, -0.2, "\n".join(linhas), transform=ax.transAxes, va="top", ha="left",
-                        fontsize=t["fonte.equacao"], linespacing=1.35)
+                        fontsize=t["fonte.equacao"], linespacing=1.35, gid="equacao")
             else:
                 xa = 0.03 if "esquerda" in pos else 0.97
                 ya, va = (0.98, "top") if pos.startswith("sup") else (0.03, "bottom")
                 ax.text(xa, ya, "\n".join(linhas), transform=ax.transAxes, va=va, ha="left" if xa < 0.5 else "right",
-                        fontsize=t["fonte.equacao"], linespacing=1.35)
+                        fontsize=t["fonte.equacao"], linespacing=1.35, gid="equacao")
         elif legenda:
             chars = int(_largura_ax_mm(ax) / (0.19 * t["fonte.equacao"]))
             labs = []
@@ -1153,7 +1284,8 @@ def desenhar_regressao(ax, sp: SpecRegressao, t, idioma="pt", legenda=True):
             if leg is not None and tt["legenda.posicao"] == "fora — abaixo":
                 leg.set_bbox_to_anchor((-0.02 + t["legenda.dx"], -0.13 - 0.02 * t["fonte.titulo_eixo"] / 7 + t["legenda.dy"]))
     elif multi and legenda:
-        _legenda(ax, t, handles, [tm.nome_rico(t, r) for r, *_ in textos], sp.titulo_legenda, "dentro — inf. direita")
+        _legenda(ax, t, handles, [tm.nome_rico(t, r) for r, *_ in textos], sp.titulo_legenda, "dentro — inf. direita",
+                 pontas=pontas_r)
     _anotacoes(ax, t, float(np.nanmean(np.concatenate([c.medias for c in curvas]))), "y", idioma)
     estilizar_eixo(ax, t, idioma)
     if _escala(t, "x") not in ("linear", "ln") and not t["eixos.x_passo"]:
@@ -1182,7 +1314,7 @@ def desenhar_perfil(ax, sp: SpecPerfil, t, idioma="pt", legenda=True):
     kc = len(camadas)
     pos = np.arange(kc)
     ms = t["series.marcador_tam"]
-    handles, labels = [], []
+    handles, labels, pontas_p = [], [], []
     for j, s in enumerate(series):
         g = str(s.get("rotulo")) if multi else "série"
         cor = tm.cor_grupo(t, g, j) if multi else (t["grupos.cores"].get("série") or t["series.cor_unica"])
@@ -1199,6 +1331,7 @@ def desenhar_perfil(ax, sp: SpecPerfil, t, idioma="pt", legenda=True):
         handles.append(Line2D([], [], color=cor, marker=mk, ms=ms * 0.9, lw=t["series.linha_esp"], ls=ls,
                               mec=t["series.marcador_borda_cor"]))
         labels.append(tm.nome_rico(t, s.get("rotulo")))
+        pontas_p.append((float(m[-1]), float(pos[-1] + off)))
     ax.set_yticks(pos, [tm.nome_rico(t, c) for c in camadas])
     ax.set_ylim(kc - 0.6, -0.4)
     if t["eixos.x_min"] is not None or t["eixos.x_max"] is not None:
@@ -1212,7 +1345,7 @@ def desenhar_perfil(ax, sp: SpecPerfil, t, idioma="pt", legenda=True):
     _rotulos_eixos(ax, t, sp.rotulo_valor, sp.rotulo_camada)
     _anotacoes(ax, t, float(np.nanmean(np.concatenate([np.asarray(s_["medias"], float) for s_ in series]))), "x", idioma)
     if multi and legenda:
-        _legenda(ax, t, handles, labels, sp.titulo_legenda, "fora — abaixo")
+        _legenda(ax, t, handles, labels, sp.titulo_legenda, "fora — abaixo", pontas=pontas_p, abaixo=True)
         leg = ax.get_legend()
         if leg is not None and t["legenda.posicao"] == "automática":
             leg.set_bbox_to_anchor((0 + t["legenda.dx"], -0.02 + t["legenda.dy"]))
@@ -1459,7 +1592,97 @@ def desenhar_dendrograma(ax, sp, t, idioma="pt", legenda=True):
     return ax
 
 
-DESENHAR = {"dendrograma": desenhar_dendrograma, "medias": desenhar_medias, "grupos": desenhar_grupos, "regressao": desenhar_regressao,
+def desenhar_empilhado(ax, sp: SpecEmpilhado, t, idioma="pt", legenda=True):
+    """Barras empilhadas (valores ou 100%), com rótulo de cada segmento e do total."""
+    H = bool(t["medias.horizontal"])
+    cats = _ordem(sp.categorias, t)
+    comps = [c for c in sp.componentes if str(c) not in set(map(str, t["niveis.ocultar"]))]
+    ordem_c = [o for o in map(str, t["niveis.ordem"]) if o in map(str, comps)]
+    comps = [c for o in ordem_c for c in comps if str(c) == o] + [c for c in comps if str(c) not in ordem_c]
+    V = sp.valores.copy()
+    V.index = V.index.astype(str)
+    V = V.loc[cats, comps].astype(float).clip(lower=0)
+    pct = t["emp.modo"].startswith("percentual")
+    tot = V.sum(axis=1).to_numpy(float)
+    M = (V.div(V.sum(axis=1).replace(0, np.nan), axis=0) * 100) if pct else V
+    pos = np.arange(len(cats), dtype=float)
+    larg = t["medias.largura"]
+    base = np.zeros(len(cats))
+    handles = []
+    lim = float(np.nanmax(M.sum(axis=1))) or 1.0
+    auto = t["medias.contorno_auto"]
+    for j, c in enumerate(comps):
+        cor = tm.cor_grupo(t, c, j)
+        v = np.nan_to_num(M[c].to_numpy(float))
+        hach = tm.HACHURAS[j % len(tm.HACHURAS)] if t["medias.hachuras"] else ""
+        kw = dict(color=to_rgba(cor, t["medias.barra_alfa"]), hatch=hach, zorder=2,
+                  edgecolor=_escurecer(cor) if auto else (t["medias.contorno_cor"] if t["medias.contorno_esp"] else t["tela.fundo"]),
+                  linewidth=t["medias.contorno_esp"] or 0.5)
+        if H:
+            ax.barh(pos, v, left=base, height=larg, **kw)
+        else:
+            ax.bar(pos, v, bottom=base, width=larg, **kw)
+        if t["emp.rotulos"]:
+            r, g, b_, _ = to_rgba(cor)
+            claro = (0.299 * r + 0.587 * g + 0.114 * b_) > 0.6
+            for i in range(len(cats)):
+                if v[i] < 0.055 * lim:
+                    continue
+                txt = (f"{v[i]:.0f}" if pct else _num(v[i], t, idioma, 3)).replace(".", _sep(t, idioma))
+                xy = (base[i] + v[i] / 2, pos[i]) if H else (pos[i], base[i] + v[i] / 2)
+                ax.text(*xy, txt, ha="center", va="center", fontsize=t["fonte.letras"] * 0.9,
+                        color="#1A1A1A" if claro else "white", zorder=4, clip_on=True)
+        base = base + v
+        handles.append(Patch(facecolor=to_rgba(cor, t["medias.barra_alfa"]), edgecolor="none", hatch=hach,
+                             label=tm.nome_rico(t, c)))
+    topo = base.copy()
+    if not pct and sp.ep_total is not None and t["erro.tipo"] != "nenhuma":
+        ep = pd.Series(np.asarray(sp.ep_total, float), index=[str(c) for c in sp.categorias]).loc[cats].to_numpy()
+        kw = dict(fmt="none", ecolor=t["eixos.cor"], elinewidth=t["erro.esp"], capsize=t["erro.chapeu"],
+                  capthick=t["erro.esp"], zorder=5)
+        if H:
+            ax.errorbar(base, pos, xerr=[np.zeros_like(ep), ep], **kw)
+        else:
+            ax.errorbar(pos, base, yerr=[np.zeros_like(ep), ep], **kw)
+        topo = base + np.nan_to_num(ep)
+    if t["emp.total"] and not pct:
+        for i in range(len(cats)):
+            txt = _num(tot[i], t, idioma, 3).replace(".", _sep(t, idioma))
+            if H:
+                ax.annotate(txt, (topo[i], pos[i]), xytext=(3, 0), textcoords="offset points", ha="left", va="center",
+                            fontsize=t["fonte.letras"], gid="letras")
+            else:
+                ax.annotate(txt, (pos[i], topo[i]), xytext=(0, 2), textcoords="offset points", ha="center",
+                            va="bottom", fontsize=t["fonte.letras"], gid="letras")
+    hi = 100.0 if pct else float(np.nanmax(topo))
+    nomes = [tm.nome_rico(t, c) for c in cats]
+    ry = sp.rotulo_y if not pct else ("Proporção (%)" if idioma == "pt" else "Proportion (%)")
+    if H:
+        ax.set_xlim(0, hi * (1.0 if pct else 1.10))
+        ax.set_ylim(len(cats) - 0.5, -0.5)
+        ax.set_yticks(pos, _quebrar(nomes, 22))
+        ax.tick_params(axis="y", length=0)
+        estilizar_eixo(ax, t, idioma, y_categorico=True)
+        ax.xaxis.set_major_formatter(_formatador(t, t["eixos.y_decimais"], idioma))
+        _rotulos_eixos(ax, t, ry, sp.rotulo_x)
+    else:
+        if pct:
+            ax.set_ylim(0, 100)
+        else:
+            _limites_y(ax, t, 0.0, hi, 0.10 if t["emp.total"] else 0.05, zero=True)
+        ax.set_xlim(-0.6, len(cats) - 0.4)
+        larg_char = max(6, (_largura_ax_mm(ax) * 1.12 / max(len(cats), 1)) / (0.165 * t["fonte.numeros"]))
+        _rotulos_categoricos(ax, pos, nomes, larg_char, t)
+        _anotacoes(ax, t, None, "y", idioma)
+        estilizar_eixo(ax, t, idioma, x_categorico=True)
+        _rotulos_eixos(ax, t, sp.rotulo_x, ry)
+    if legenda:
+        hs = handles[::-1] if not H else handles
+        _legenda(ax, t, hs, [h.get_label() for h in hs], sp.titulo_legenda, padrao="fora — direita")
+    return ax
+
+
+DESENHAR = {"empilhado": desenhar_empilhado, "dendrograma": desenhar_dendrograma, "medias": desenhar_medias, "grupos": desenhar_grupos, "regressao": desenhar_regressao,
             "perfil": desenhar_perfil, "correlacao": desenhar_correlacao, "pca": desenhar_pca}
 
 
@@ -1475,6 +1698,8 @@ def _altura_padrao(sp, t):
         return max(40, 6 * len(sp.rotulos) + 22)
     if sp.tipo == "medias" and t["medias.horizontal"]:
         return max(50, 6.5 * len(sp.niveis) + 22)
+    if sp.tipo == "empilhado" and t["medias.horizontal"]:
+        return max(50, 7.5 * len(sp.categorias) + 24)
     if sp.tipo == "regressao" and len(sp.curvas) > 1 and (t["reg.equacao"] or t["reg.r2"]):
         return W * t["tela.proporcao"] + 7 * len(sp.curvas) * t["fonte.equacao"] / 6.5
     return W * t["tela.proporcao"]
@@ -1494,7 +1719,9 @@ def figura(sp, t, idioma="pt"):
             fig, ax = plt.subplots(figsize=(W * MM, H * MM), layout="constrained")
             DESENHAR[sp.tipo](ax, sp, t, idioma)
             if t["tela.titulo"]:
-                ax.set_title(tm.rico(t["tela.titulo"]), loc="left", fontsize=t["fonte.tamanho"], fontweight=t["fonte.peso_titulos"])
+                ax.set_title(tm.rico(t["tela.titulo"]), loc="left", fontsize=t["fonte.tamanho"],
+                             fontweight=t["fonte.peso_titulos"],
+                             pad=(t["fonte.legenda"] * 1.5 + 6) if getattr(ax, "_estat", None) else None)
             if not t["eixos.x_rotacao"]:
                 _corrigir_sobreposicao(fig)
         else:
@@ -1646,6 +1873,86 @@ def gerar_previa(sp, t, idioma="pt", dpi=150) -> bytes:
         fig = figura(sp, t, idioma)
         try:
             return previa(fig, dpi)
+        finally:
+            plt.close(fig)
+
+
+ROTULOS_REGIAO = {"dados": "Área do gráfico", "eixo_y": "Eixo Y", "eixo_x": "Eixo X", "titulo_y": "Título do eixo Y",
+                  "titulo_x": "Título do eixo X", "legenda": "Legenda", "letras": "Letras e valores",
+                  "equacao": "Equação", "estat": "Resumo estatístico", "titulo": "Título", "tela": "Tamanho e fundo"}
+
+
+def _regioes(fig):
+    """Caixas clicáveis da figura (frações da imagem; origem no canto superior esquerdo)."""
+    fig.canvas.draw()
+    r = fig.canvas.get_renderer()
+    W, Hh = fig.bbox.width, fig.bbox.height
+    out = []
+
+    def add(rid, bb, folga=2.0):
+        if bb is None or bb.width <= 0 or bb.height <= 0:
+            return
+        x0, y0 = max(bb.x0 - folga, 0), max(bb.y0 - folga, 0)
+        x1, y1 = min(bb.x1 + folga, W), min(bb.y1 + folga, Hh)
+        if x1 - x0 < 3 or y1 - y0 < 3:
+            return
+        out.append(dict(id=rid, rot=ROTULOS_REGIAO.get(rid, rid), x=x0 / W, y=1 - y1 / Hh, w=(x1 - x0) / W,
+                        h=(y1 - y0) / Hh))
+
+    from matplotlib.transforms import Bbox
+    eixos = [a for a in fig.axes if a.get_visible()]
+    for ax in eixos[:1] if len(eixos) > 2 else eixos:
+        add("dados", ax.get_window_extent(r), 0)
+        for nome, axis in (("x", ax.xaxis), ("y", ax.yaxis)):
+            try:
+                rot = axis.label
+                bbl = rot.get_window_extent(r) if rot.get_text().strip() else None
+                marcas = [tk.label1.get_window_extent(r) for tk in axis.get_major_ticks()
+                          if tk.label1.get_visible() and tk.label1.get_text()] + \
+                         [tk.label2.get_window_extent(r) for tk in axis.get_major_ticks()
+                          if tk.label2.get_visible() and tk.label2.get_text()]
+                marcas = [b for b in marcas if b.width > 0 and b.x1 > 0 and b.y1 > 0 and b.x0 < W and b.y0 < Hh]
+                if marcas:
+                    add(f"eixo_{nome}", Bbox.union(marcas), 3)
+                add(f"titulo_{nome}", bbl, 3)
+            except Exception:
+                pass
+        if ax.get_title(loc="left").strip():
+            add("titulo", ax._left_title.get_window_extent(r))
+        leg = ax.get_legend()
+        if leg is not None:
+            add("legenda", leg.get_window_extent(r))
+        por_gid = {}
+        for tx in ax.texts:
+            g = tx.get_gid()
+            if g and tx.get_text().strip():
+                try:
+                    por_gid.setdefault(g, []).append(tx.get_window_extent(r))
+                except Exception:
+                    pass
+        for g, bbs in por_gid.items():
+            if g == "letras":
+                for bb in bbs:
+                    add("letras", bb, 2)
+            else:
+                add(g, Bbox.union(bbs), 2)
+    if getattr(fig, "_suptitle", None) is not None and fig._suptitle.get_text().strip():
+        add("titulo", fig._suptitle.get_window_extent(r))
+    return out
+
+
+def gerar_previa_mapa(sp, t, idioma="pt", dpi=150):
+    """Prévia em PNG e as regiões clicáveis (eixos, legenda, letras…) para a edição por clique."""
+    with _TRAVA:
+        fig = figura(sp, t, idioma)
+        try:
+            try:
+                regs = _regioes(fig) if sp.tipo != "diagnostico" else []
+            except Exception:
+                regs = []
+            if not any(r_["id"] == "dados" for r_ in regs):      # sempre há ao menos a área do gráfico
+                regs.insert(0, dict(id="dados", rot=ROTULOS_REGIAO["dados"], x=0.0, y=0.0, w=1.0, h=1.0))
+            return previa(fig, dpi), regs, (fig.get_figwidth() * 25.4, fig.get_figheight() * 25.4)
         finally:
             plt.close(fig)
 

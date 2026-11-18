@@ -21,7 +21,7 @@ import streamlit as st
 
 RAIZ = Path(__file__).resolve().parent
 ASSETS = RAIZ / "assets"
-REVISAO = "2.2.1"
+REVISAO = "3.0.0"
 
 # ----------------------------------------------------------------------------
 # Paleta (uma fonte única para config em tempo de execução e CSS)
@@ -281,6 +281,71 @@ div[data-testid="stImage"] img {{ background:#FFFFFF; padding:10px; border-radiu
 .st-key-barra_rapida {{ background:var(--painel); border:1px solid var(--borda); border-radius:6px; padding:8px 12px 2px;
   box-shadow:inset 0 1px 0 var(--tecla-luz); }}
 
+
+/* ---------- estúdio: painel do elemento clicado e paletas ---------- */
+.ss-ctx {{ display:flex; flex-direction:column; gap:2px; padding:9px 12px 8px; margin:2px 0 4px; border-left:3px solid var(--laranja);
+  background:var(--painel); border-radius:0 6px 6px 0; }}
+.ss-ctx b {{ font:640 15px/1.25 var(--f-largo); font-stretch:112%; color:var(--texto); }}
+.ss-ctx span {{ font:400 12.5px/1.4 var(--f-texto); color:var(--mudo); }}
+.ss-paleta {{ display:flex; align-items:center; gap:12px; justify-content:space-between; font:400 13px/1.3 var(--f-texto);
+  color:var(--mudo); padding:2px 2px 0; }}
+.ss-paleta b {{ color:var(--texto); font-weight:600; margin-right:4px; }}
+.ss-paleta > div {{ flex:0 0 46%; }}
+.st-key-tabela_dados {{ overflow:hidden !important; border:1px solid var(--borda); border-radius:6px; }}
+.st-key-tabela_dados [data-testid="stDataFrameResizable"] {{ height:250px !important; max-height:250px !important;
+  width:100% !important; max-width:100% !important; }}
+.st-key-tabela_dados [data-testid="stDataFrameResizable"] > div:last-child:not(.stDataFrameGlideDataEditor) {{ display:none !important; }}
+.st-key-est_elem [role="radiogroup"] {{ flex-wrap:wrap !important; row-gap:6px; }}
+.st-key-painel_ctx label p {{ white-space:normal !important; overflow:visible !important; text-overflow:clip !important; }}
+
+/* ---------- quadro de resultados ---------- */
+.ss-quadro {{ background:var(--painel); border:1px solid var(--borda); border-radius:6px; padding:12px 14px 10px;
+  box-shadow:inset 0 1px 0 var(--tecla-luz), 0 2px 0 var(--tecla-sombra); font-family:var(--f-texto); color:var(--texto); }}
+.ss-quadro h5 {{ margin:0 0 8px; font:640 12px/1.2 var(--f-largo); font-stretch:118%; letter-spacing:.06em;
+  text-transform:uppercase; color:var(--mudo); }}
+.ss-ef {{ display:grid; grid-template-columns:minmax(90px, 1.2fr) minmax(170px, 2.6fr) 56px 66px 126px; gap:4px 12px;
+  align-items:center; font-size:13.5px; }}
+.ss-ef .cab {{ font-size:11.5px; color:var(--mudo); padding-bottom:3px; border-bottom:1px solid var(--borda); }}
+.ss-ef .num {{ text-align:right; font-variant-numeric:tabular-nums; }}
+.ss-ef .nome {{ font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
+.ss-ef .nome.local {{ font-weight:400; color:var(--mudo); }}
+.ss-trilho {{ position:relative; height:16px; background:var(--lcd-fundo); border-radius:2px;
+  box-shadow:inset 0 1px 3px rgba(0,0,0,.4), inset 0 0 0 1px var(--lcd-borda); }}
+.ss-trilho i {{ position:absolute; left:0; top:0; bottom:0; background:var(--laranja); border-radius:2px 0 0 2px; }}
+.ss-trilho i.ns {{ background:var(--mudo); opacity:.55; }}
+.ss-eta {{ display:flex; align-items:center; gap:8px; }}
+.ss-eta .ss-trilho {{ flex:1; }}
+.ss-eta span {{ flex:0 0 92px; font-size:12px; color:var(--mudo); font-variant-numeric:tabular-nums; white-space:nowrap; }}
+.ss-eta span b {{ color:var(--texto); font-weight:600; }}
+.ss-chip {{ display:inline-flex; align-items:center; gap:5px; padding:1px 8px 1px 6px; border-radius:10px; font-size:11.5px;
+  font-weight:600; border:1px solid var(--borda); white-space:nowrap; }}
+.ss-chip.sig {{ background:var(--laranja); color:#1F1C19; border-color:var(--primaria-borda); }}
+.ss-chip.ns {{ color:var(--mudo); }}
+.ss-ck {{ display:grid; grid-template-columns:16px 1fr auto auto; gap:5px 10px; align-items:center; font-size:13px; }}
+.ss-ck .grupo {{ grid-column:1 / -1; font:640 12.5px/1.2 var(--f-largo); font-stretch:110%; margin-top:7px; display:flex;
+  align-items:center; gap:8px; }}
+.ss-ck .grupo:first-child {{ margin-top:0; }}
+.ss-ck .t {{ color:var(--texto); }} .ss-ck .t small {{ color:var(--mudo); font-size:11.5px; }}
+.ss-ck .v {{ color:var(--mudo); font-variant-numeric:tabular-nums; text-align:right; font-size:12.5px; }}
+.ss-destaques {{ display:flex; flex-direction:column; gap:7px; font-size:13.5px; line-height:1.45; }}
+.ss-destaques b {{ font-weight:640; }}
+.ss-destaques .linha {{ padding-left:10px; border-left:2px solid var(--borda); }}
+.ss-destaques .linha.sig {{ border-left-color:var(--laranja); }}
+table.ss-matriz {{ border-collapse:collapse; width:100%; font:400 13px/1.35 var(--f-texto); color:var(--texto); }}
+table.ss-matriz th {{ font:600 12px/1.25 var(--f-texto); color:var(--mudo); text-align:center; padding:4px 8px 6px;
+  border-bottom:1px solid var(--borda); vertical-align:bottom; }}
+table.ss-matriz th:first-child, table.ss-matriz td:first-child {{ text-align:left; font-weight:600; }}
+table.ss-matriz td {{ text-align:center; padding:5px 8px; border-bottom:1px solid var(--borda); font-variant-numeric:tabular-nums; }}
+table.ss-matriz tr:last-child td {{ border-bottom:none; }}
+table.ss-matriz .cel {{ display:inline-block; min-width:44px; padding:1px 6px; border-radius:3px; font-weight:600; }}
+table.ss-matriz .p3 {{ background:var(--laranja); color:#1F1C19; }}
+table.ss-matriz .p2 {{ background:color-mix(in srgb, var(--laranja) 62%, transparent); color:var(--texto); }}
+table.ss-matriz .p1 {{ background:color-mix(in srgb, var(--laranja) 30%, transparent); color:var(--texto); }}
+table.ss-matriz .p0 {{ color:var(--mudo); font-weight:400; }}
+.ss-pasta-nome {{ font:600 12.5px/1.3 var(--f-texto); color:var(--texto); overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap; margin-top:4px; }}
+.ss-pasta-sub {{ font:400 11.5px/1.3 var(--f-texto); color:var(--mudo); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
+
 /* ---------- painéis, expansores, avisos ---------- */
 div[data-testid="stExpander"] details {{ border:1px solid var(--borda) !important; border-radius:6px !important;
   background:var(--painel); box-shadow:inset 0 1px 0 var(--tecla-luz); }}
@@ -398,3 +463,76 @@ def mostrador(rotulo: str, valor: str, sub: str = "", led: str | None = None):
 def vazio(titulo: str, texto: str):
     st.html(f"<div class='ss-vazio'><img src='{img64('logo_emblema_solo.png')}' alt=''>"
             f"<div><b>{titulo}</b>{texto}</div></div>")
+
+
+# ----------------------------------------------------------------------------
+# Quadro de resultados
+# ----------------------------------------------------------------------------
+def _n(v, dec=2):
+    return f"{v:.{dec}f}".replace(".", ",")
+
+
+def p_txt(p):
+    if p is None or p != p:
+        return "—"
+    return "< 0,001" if p < 0.001 else _n(p, 3)
+
+
+def tamanho_efeito(e):
+    """Classes de Cohen para o eta² parcial."""
+    if e is None or e != e:
+        return ""
+    return "trivial" if e < 0.01 else "pequeno" if e < 0.06 else "médio" if e < 0.14 else "grande"
+
+
+def quadro_efeitos(linhas, alfa=0.05):
+    """linhas: dict(nome, f, p, eta, local) — uma por efeito testado na ANOVA."""
+    h = ("<div class='cab'>Efeito</div><div class='cab'>η² parcial (parte da variação explicada)</div>"
+         "<div class='cab num'>F</div><div class='cab num'>p</div><div class='cab'>Veredito</div>")
+    for l in linhas:
+        sig = l["p"] is not None and l["p"] < alfa
+        eta = l.get("eta")
+        tem = eta is not None and eta == eta
+        barra = (f"<div class='ss-eta' title='η²p = {_n(eta, 3)} ({tamanho_efeito(eta)})'><div class='ss-trilho'>"
+                 f"<i class='{'' if sig else 'ns'}' style='width:{max(min(eta, 1), 0) * 100:.1f}%'></i></div>"
+                 f"<span><b>{_n(eta, 2)}</b> {tamanho_efeito(eta)}</span></div>") if tem else "<div></div>"
+        est = "***" if l["p"] < 0.001 else "**" if l["p"] < 0.01 else "*" if l["p"] < 0.05 else ""
+        chip = (f"<span class='ss-chip sig'>significativo {est}</span>" if sig else "<span class='ss-chip ns'>não signif.</span>")
+        if l.get("local"):
+            chip = f"<span class='ss-chip ns'>controle local{' ' + est if est else ''}</span>"
+        h += (f"<div class='nome{' local' if l.get('local') else ''}' title='{l['nome']}'>{l['nome']}</div>{barra}"
+              f"<div class='num'>{_n(l['f'], 2)}</div><div class='num'>{p_txt(l['p'])}</div><div>{chip}</div>")
+    st.html(f"<div class='ss-quadro'><h5>Efeitos do modelo</h5><div class='ss-ef'>{h}</div></div>")
+
+
+def checklist(grupos):
+    """grupos: lista de (titulo, estado, [(nome, nota, estatistica, p, estado)]) com estado em ok/alerta/''."""
+    h = ""
+    for titulo, estado, testes in grupos:
+        h += f"<div class='grupo'><span class='ss-led {estado}'></span>{titulo}</div>"
+        for nome, nota, est, p, e in testes:
+            det = f" <small>{nota}</small>" if nota else ""
+            h += (f"<span class='ss-led {e}' style='transform:scale(.8)'></span><span class='t'>{nome}{det}</span>"
+                  f"<span class='v'>{est}</span><span class='v'>{p}</span>")
+    st.html(f"<div class='ss-quadro'><h5>Pressupostos da ANOVA</h5><div class='ss-ck'>{h}</div></div>")
+
+
+def destaques(itens):
+    """itens: lista de (html, significativo)."""
+    h = "".join(f"<div class='linha{' sig' if s else ''}'>{t}</div>" for t, s in itens)
+    st.html(f"<div class='ss-quadro'><h5>Leitura rápida</h5><div class='ss-destaques'>{h}</div></div>")
+
+
+def matriz_geral(colunas, linhas):
+    """linhas: (rótulo, {coluna: p}, cv, estado dos pressupostos)."""
+    def cel(p):
+        if p is None or p != p:
+            return "<span class='cel p0'>—</span>"
+        c, e = ("p3", "***") if p < 0.001 else ("p2", "**") if p < 0.01 else ("p1", "*") if p < 0.05 else ("p0", "ns")
+        return f"<span class='cel {c}' title='p = {p_txt(p)}'>{e}</span>"
+    cab = "<tr><th>Variável</th>" + "".join(f"<th>{c}</th>" for c in colunas) + "<th>CV (%)</th><th>Pressupostos</th></tr>"
+    corpo = ""
+    for rot, ps, cv, est in linhas:
+        corpo += (f"<tr><td>{rot}</td>" + "".join(f"<td>{cel(ps.get(c))}</td>" for c in colunas)
+                  + f"<td>{cv}</td><td><span class='ss-led {est}'></span></td></tr>")
+    st.html(f"<div class='ss-quadro'><table class='ss-matriz'>{cab}{corpo}</table></div>")
